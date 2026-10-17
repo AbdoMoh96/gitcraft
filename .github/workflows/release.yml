@@ -1,0 +1,114 @@
+name: Release
+
+# Push a tag `v<version>` (matching `version` in Cargo.toml) to build GitCraft for Linux, macOS and
+# Windows and publish a GitHub Release with the packages. Running the workflow by hand
+# (Actions › Release › Run workflow) builds the packages as artifacts without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check version and quality gates
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
+      - name: Version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "gitcraft") | .version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($version): expected v$version"
+            exit 1
+          fi
+      - run: git config --global user.name CI && git config --global user.email ci@example.com
+      - run: cargo xtask ci
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p gitcraft -p gitcraft-cli
+      - name: Package
+        shell: bash
+        run: packaging/package.sh ${{ matrix.target }} ${{ needs.check.outputs.version }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitcraft-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [check, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          # A version with a suffix (1.0.0-beta.1) is published as a pre-release.
+          pre=()
+          [[ "$VERSION" == *-* ]] && pre=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "GitCraft $VERSION" \
+            --generate-notes \
+            "${pre[@]}"

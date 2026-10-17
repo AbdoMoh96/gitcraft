@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=GitCraft
+GenericName=Git Client
+Comment=Fast, open-source Git client
+Exec=@BIN@ %F
+Icon=gitcraft
+Terminal=false
+Categories=Development;RevisionControl;
+StartupWMClass=gitcraft

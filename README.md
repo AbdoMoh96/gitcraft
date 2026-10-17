@@ -114,3 +114,8 @@ cargo run -p gitcraft-ui-egui --example ui_shot -- shot.png --cmd 'graph.select=
 
 MIT OR Apache-2.0, at your option. GitCraft is not affiliated with or endorsed by the makers of any
 other Git client; see [`NOTICE`](NOTICE).
+
+## Releases
+
+Pre-built packages for Linux, macOS and Windows are on the GitHub Releases page. Pushing a tag
+`v<version>` builds and publishes them: see [docs/releasing.md](docs/releasing.md).

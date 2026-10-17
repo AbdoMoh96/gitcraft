@@ -33,6 +33,9 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 - **2026-10-17 — M1.** Double-clicking a remote branch now pulls it (`branch.pullRemote`, in the
   background): fetch, check out (tracking a new local branch, setting a missing upstream),
   fast-forward; when the two have diverged a dialog offers merge, rebase or reset to the remote.
+- **2026-10-17 — M1.** Release workflow: pushing tag `v<version>` checks it against Cargo.toml,
+  runs `cargo xtask ci`, builds Linux (tarball + installer), macOS (arm64 and x86_64 `.app`) and
+  Windows (zip) packages and publishes a GitHub Release (`docs/releasing.md`).
 - **2026-10-17 — M1.** Workspace in the WordCraft layout (control-key, git, graph, engine, mcp,
   ui-egui, apps, xtask). Clean-room inventory of the target (`docs/clean-room.md`). git layer with
   parsers for status v2, log, refs, diffs, blame, stashes, remotes and hunk/line patches; operations
