@@ -330,3 +330,74 @@ fn drag_branch_onto_branch() {
         assert!(s.run("branch.dropOnto", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn checking_out_a_remote_branch_tracks_or_fast_forwards() {
+    let (d, up) = sample("eng-remote-checkout").unwrap();
+    let clone = up.git().clone_repo(&up.root().to_string_lossy(), &d.path().join("clone")).unwrap();
+    let mut s = Session::new(clone.git().clone());
+    s.set_repo(clone.clone()).unwrap();
+    // A remote-only branch: a local branch is made to track it.
+    let r = run(&mut s, "branch.checkout", json!({"name": "origin/feature"}));
+    assert_eq!(r["name"], json!("feature"));
+    assert_eq!(s.data.status.branch.as_deref(), Some("feature"));
+    // Upstream main moves on; after a fetch, checking out origin/main fast-forwards local main.
+    write(&up, "NEW.md", "x\n").unwrap();
+    gitcraft_git::testing::commit_all(&up, "Upstream").unwrap();
+    run(&mut s, "remote.fetch", json!({}));
+    let theirs = clone.resolve("origin/main").unwrap();
+    let mine = clone.resolve("main").unwrap();
+    assert_ne!(mine, theirs);
+    let r = run(&mut s, "branch.checkout", json!({"name": "origin/main"}));
+    assert!(r["message"].as_str().unwrap().contains("fast-forwarded"), "{r}");
+    assert_eq!(s.data.status.branch.as_deref(), Some("main"));
+    assert_eq!(clone.resolve("main").as_deref(), Some(theirs.as_str()));
+    // Undo puts main back and returns to feature.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.data.status.branch.as_deref(), Some("feature"));
+    assert_eq!(clone.resolve("main").as_deref(), Some(mine.as_str()));
+    // Up to date: just a checkout.
+    run(&mut s, "branch.checkout", json!({"name": "origin/feature"}));
+    assert_eq!(s.data.status.branch.as_deref(), Some("feature"));
+}
+
+#[test]
+fn pull_remote_branch_fetches_tracks_and_integrates() {
+    let (d, up) = sample("eng-pull-remote").unwrap();
+    let clone = up.git().clone_repo(&up.root().to_string_lossy(), &d.path().join("clone")).unwrap();
+    let mut s = Session::new(clone.git().clone());
+    s.set_repo(clone.clone()).unwrap();
+    // A branch only on the remote: tracked and checked out.
+    let r = run(&mut s, "branch.pullRemote", json!({"name": "origin/feature"}));
+    assert_eq!(r["name"], json!("feature"));
+    // Upstream main moves on: fetched and fast-forwarded without a separate fetch.
+    write(&up, "A.md", "a\n").unwrap();
+    gitcraft_git::testing::commit_all(&up, "Upstream A").unwrap();
+    let r = run(&mut s, "branch.pullRemote", json!({"name": "origin/main"}));
+    assert!(r["message"].as_str().unwrap().contains("fast-forward"), "{r}");
+    assert_eq!(clone.resolve("main"), up.resolve("main"));
+    assert_eq!(clone.config("branch.main.merge").as_deref(), Some("refs/heads/main"));
+    // Both sides move: diverged, nothing changes until a mode is picked.
+    write(&up, "B.md", "b\n").unwrap();
+    gitcraft_git::testing::commit_all(&up, "Upstream B").unwrap();
+    write(&clone, "C.md", "c\n").unwrap();
+    let mine = gitcraft_git::testing::commit_all(&clone, "Local C").unwrap();
+    let r = run(&mut s, "branch.pullRemote", json!({"name": "origin/main"}));
+    assert_eq!(r["diverged"], json!(true), "{r}");
+    assert_eq!((r["ahead"].as_u64(), r["behind"].as_u64(), r["unique"].as_u64()), (Some(1), Some(1), Some(1)));
+    assert_eq!(clone.resolve("main").as_deref(), Some(mine.as_str()));
+    run(&mut s, "branch.pullRemote", json!({"name": "origin/main", "mode": "merge"}));
+    assert!(clone.is_ancestor("origin/main", "main") && clone.is_ancestor(&mine, "main"));
+    // Reset moves the local branch to the remote one.
+    run(&mut s, "branch.pullRemote", json!({"name": "origin/feature"}));
+    write(&clone, "D.md", "d\n").unwrap();
+    gitcraft_git::testing::commit_all(&clone, "Local D").unwrap();
+    clone.run_ok(&["reset", "-q", "--hard", "HEAD~2"]).unwrap();
+    write(&clone, "E.md", "e\n").unwrap();
+    gitcraft_git::testing::commit_all(&clone, "Local E").unwrap();
+    run(&mut s, "branch.pullRemote", json!({"name": "origin/feature", "mode": "reset"}));
+    assert_eq!(clone.resolve("feature"), clone.resolve("origin/feature"));
+    for bad in [json!({"name": "nope"}), json!({"name": "origin/nope"}), json!({"name": "origin/main", "mode": "squash"})] {
+        assert!(s.run("branch.pullRemote", &bad).is_err(), "{bad}");
+    }
+}

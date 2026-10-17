@@ -161,7 +161,7 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
                     let _ = app.run("graph.select", json!({"oid": r.commit}));
                 }
                 if resp.double_clicked() {
-                    let _ = app.run("branch.checkout", json!({"name": r.name}));
+                    let _ = app.run("branch.pullRemote", json!({"name": r.name}));
                 }
                 resp.context_menu(|ui| branch_menu(app, ui, r));
             }

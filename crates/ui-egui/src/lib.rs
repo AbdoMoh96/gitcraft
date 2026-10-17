@@ -294,6 +294,23 @@ impl GitApp {
                     }
                     self.after_open();
                 }
+                // A remote branch pulled: show where the branch is now, or ask how to combine.
+                if id == "branch.pullRemote" {
+                    if v.get("diverged").and_then(Value::as_bool).unwrap_or(false) {
+                        let get = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                        let n = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+                        self.dialog = Some(Dialog::Diverged {
+                            local: get("name"),
+                            remote: get("remote"),
+                            ahead: n("ahead"),
+                            behind: n("behind"),
+                            unique: v.get("unique").and_then(Value::as_u64).unwrap_or(1),
+                        });
+                    } else {
+                        let _ = self.session.run("graph.selectHead", &json!({}));
+                        self.scroll_to_selection = true;
+                    }
+                }
                 if id.starts_with("graph.select") || id == "commit.create" {
                     self.scroll_to_selection = true;
                 }

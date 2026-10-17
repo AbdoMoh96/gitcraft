@@ -234,11 +234,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             if resp.clicked() {
                 actions.push(Action::Run("graph.select", json!({"oid": commit.oid})));
             }
-            if resp.double_clicked() {
-                // Double-click checks out the row's branch.
-                if let Some(l) = labels(d, &commit.oid).into_iter().find(|l| l.local && !l.head) {
-                    actions.push(Action::Run("branch.checkout", json!({"name": l.text})));
-                }
+            if resp.double_clicked()
+                && let Some(t) = checkout_target(&labels(d, &commit.oid))
+            {
+                actions.push(t.action());
             }
             let resp = if over_node {
                 resp.on_hover_ui_at_pointer(|ui| person_card(ui, &app.avatars, commit))
@@ -321,7 +320,9 @@ fn label_popup(app: &mut GitApp, ctx: &egui::Context) {
                         format!("Check out {}", l.text)
                     });
                     if resp.clicked() && !l.head {
-                        run = Some(if l.local || l.remote {
+                        run = Some(if l.remote && !l.local {
+                            ("branch.pullRemote", json!({"name": l.text}))
+                        } else if l.local {
                             ("branch.checkout", json!({"name": l.text}))
                         } else {
                             ("commit.checkout", json!({"oid": pop.oid}))
@@ -432,6 +433,31 @@ fn drop_menu(app: &mut GitApp, ctx: &egui::Context) {
     }
 }
 
+/// What double-clicking a row checks out.
+#[derive(Debug, PartialEq)]
+enum Target {
+    /// A local branch that isn't checked out.
+    Local(String),
+    /// A remote branch: fetched, then its local branch tracks it or is pulled up to it.
+    Remote(String),
+}
+
+impl Target {
+    fn action(self) -> Action {
+        match self {
+            Target::Local(n) => Action::Run("branch.checkout", json!({"name": n})),
+            Target::Remote(n) => Action::Run("branch.pullRemote", json!({"name": n})),
+        }
+    }
+}
+
+fn checkout_target(ls: &[Label]) -> Option<Target> {
+    if let Some(l) = ls.iter().find(|l| l.local && !l.head) {
+        return Some(Target::Local(l.text.clone()));
+    }
+    ls.iter().find(|l| l.remote && !l.local).map(|l| Target::Remote(l.text.clone()))
+}
+
 /// Clicks, double-clicks, right-clicks and drags on a row's label.
 fn pill_events(app: &GitApp, r: &egui::Response, ls: &[Label], commit: &Commit, actions: &mut Vec<Action>) {
     let Some(first) = ls.first() else { return };
@@ -443,9 +469,9 @@ fn pill_events(app: &GitApp, r: &egui::Response, ls: &[Label], commit: &Commit, 
         actions.push(Action::Run("graph.select", json!({"oid": commit.oid})));
     }
     if r.double_clicked()
-        && let Some(l) = ls.iter().find(|l| l.local && !l.head)
+        && let Some(t) = checkout_target(ls)
     {
-        actions.push(Action::Run("branch.checkout", json!({"name": l.text})));
+        actions.push(t.action());
     }
     r.context_menu(|ui| commit_menu(app, ui, commit, actions));
 }
@@ -659,7 +685,7 @@ fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) -> Option<egu
     if ls.len() > 1 {
         return Some(resp);
     }
-    Some(resp.on_hover_text(format!("{}\n\nDrag onto another branch to merge or rebase", first.text)))
+    Some(resp.on_hover_text(format!("{}\n\nDouble-click to check out; drag onto another branch to merge or rebase", first.text)))
 }
 
 fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Action>) {
@@ -745,5 +771,24 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
     if ui.button("Copy Commit Message").clicked() {
         actions.push(Action::Copy(c.message()));
         ui.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn label(text: &str, local: bool, remote: bool, head: bool) -> Label {
+        Label { text: text.into(), local, remote, tag: false, head, target: 0 }
+    }
+
+    #[test]
+    fn double_click_prefers_a_local_branch_then_a_remote_one() {
+        let remote_only = [label("main", true, false, true), label("origin/main", false, true, false)];
+        assert_eq!(checkout_target(&remote_only), Some(Target::Remote("origin/main".into())));
+        let both = [label("origin/x", false, true, false), label("x2", true, false, false)];
+        assert_eq!(checkout_target(&both), Some(Target::Local("x2".into())));
+        assert_eq!(checkout_target(&[label("main", true, true, true)]), None);
+        assert_eq!(checkout_target(&[]), None);
     }
 }

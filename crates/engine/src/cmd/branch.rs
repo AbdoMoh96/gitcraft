@@ -1,6 +1,6 @@
 //! Branches: create, check out, delete, rename, upstreams; checking out a commit.
 
-use gitcraft_git::RefKind;
+use gitcraft_git::{RefKind, ResetMode};
 use serde_json::{Value, json};
 
 use super::edit::{Head, UndoStep};
@@ -48,7 +48,28 @@ fn checkout(s: &mut Session, v: &Value) -> CmdResult {
             }
             return Ok(json!({"message": format!("Checked out {local}, tracking {name}"), "name": local}));
         }
-        local
+        // The local branch exists: bring it up to the remote one when that's a fast-forward.
+        let (Some(mine), Some(theirs)) = (repo.resolve(&format!("refs/heads/{local}")), repo.resolve(&name)) else {
+            return Err(CmdError::Params(format!("no branch `{name}`")));
+        };
+        let mut steps: Vec<UndoStep> = before.clone().map(|from| UndoStep::Checkout { from, to: Head::Branch(local.clone()) }).into_iter().collect();
+        let message = if mine == theirs || repo.is_ancestor(&theirs, &mine) {
+            format!("Checked out {local}")
+        } else if !repo.is_ancestor(&mine, &theirs) {
+            format!("Checked out {local}; it has diverged from {name}: pull to combine them")
+        } else {
+            match repo.merge(&name, true, false) {
+                Ok(o) if !o.conflicts => {
+                    steps.push(UndoStep::Reset { before: mine, after: theirs, mode: ResetMode::Hard });
+                    format!("Checked out {local} and fast-forwarded it to {name}")
+                }
+                Ok(_) | Err(_) => format!("Checked out {local}; it couldn't be fast-forwarded to {name} (uncommitted changes in the way?)"),
+            }
+        };
+        if !steps.is_empty() {
+            s.push_undo(UndoStep::Many(format!("Checkout {local}"), steps));
+        }
+        return Ok(json!({"message": message, "name": local}));
     };
     if let Some(from) = before {
         s.push_undo(UndoStep::Checkout { from, to: Head::Branch(local.clone()) });

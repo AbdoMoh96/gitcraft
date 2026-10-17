@@ -12,15 +12,55 @@ use crate::{GitApp, util};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Dialog {
-    Open { path: String },
-    Clone { url: String, into: String },
-    Init { path: String, branch: String },
-    CreateBranch { name: String, from: Option<String>, checkout: bool },
-    RenameBranch { from: String, to: String },
-    CreateTag { name: String, oid: Option<String>, message: String },
-    AddRemote { name: String, url: String },
-    Stash { message: String, untracked: bool },
-    Confirm { title: String, body: String, command: String, params: Value, action: String },
+    Open {
+        path: String,
+    },
+    Clone {
+        url: String,
+        into: String,
+    },
+    Init {
+        path: String,
+        branch: String,
+    },
+    CreateBranch {
+        name: String,
+        from: Option<String>,
+        checkout: bool,
+    },
+    RenameBranch {
+        from: String,
+        to: String,
+    },
+    CreateTag {
+        name: String,
+        oid: Option<String>,
+        message: String,
+    },
+    AddRemote {
+        name: String,
+        url: String,
+    },
+    Stash {
+        message: String,
+        untracked: bool,
+    },
+    Confirm {
+        title: String,
+        body: String,
+        command: String,
+        params: Value,
+        action: String,
+    },
+    /// A local branch and its remote one both have new commits: how to combine them.
+    Diverged {
+        local: String,
+        remote: String,
+        ahead: u64,
+        behind: u64,
+        /// Local commits whose change isn't on the remote already (merges aside).
+        unique: u64,
+    },
     Shortcuts,
     Preferences,
 }
@@ -50,6 +90,13 @@ impl Dialog {
             "tag.create" => Dialog::CreateTag { name: String::new(), oid: st("oid").or(selected), message: String::new() },
             "remote.add" => Dialog::AddRemote { name: if s.data.remotes.is_empty() { "origin".into() } else { String::new() }, url: String::new() },
             "stash.save" => Dialog::Stash { message: String::new(), untracked: true },
+            "diverged" => Dialog::Diverged {
+                local: st("local")?,
+                remote: st("remote")?,
+                ahead: v.get("ahead").and_then(Value::as_u64).unwrap_or(0),
+                behind: v.get("behind").and_then(Value::as_u64).unwrap_or(0),
+                unique: v.get("unique").and_then(Value::as_u64).unwrap_or(1),
+            },
             "shortcuts" | "ui.shortcuts" => Dialog::Shortcuts,
             "preferences" | "ui.preferences" => Dialog::Preferences,
             _ => return None,
@@ -71,6 +118,7 @@ impl Dialog {
             Dialog::AddRemote { .. } => "remote.add",
             Dialog::Stash { .. } => "stash.save",
             Dialog::Confirm { .. } => "confirm",
+            Dialog::Diverged { .. } => "diverged",
             Dialog::Shortcuts => "shortcuts",
             Dialog::Preferences => "preferences",
         }
@@ -312,6 +360,69 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
             if ok {
                 return Close::Run(command.clone(), params.clone());
+            }
+        }
+        Dialog::Diverged { local, remote, ahead, behind, unique } => {
+            let plural = |n: u64| if n == 1 { "commit" } else { "commits" };
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
+                crate::icons::paint(ui.painter(), r, crate::icons::Icon::Pull, t.accent, t.accent);
+                ui.heading(format!("{local} has diverged from {remote}"));
+            });
+            ui.add_space(6.0);
+            ui.label(format!(
+                "{local} has {ahead} {} that {remote} doesn't, and {remote} has {behind} {} that {local} doesn't. How should they be combined?",
+                plural(*ahead),
+                plural(*behind)
+            ));
+            // Every local change is on the remote already (its history was rewritten): a merge
+            // would duplicate them, so rebasing (which skips them) comes first.
+            let rewritten = *unique == 0;
+            if rewritten {
+                ui.add_space(6.0);
+                ui.label(RichText::new(format!("All of {local}'s changes are already on {remote} (its history was rewritten). Rebasing or resetting gives you {remote}'s history; merging would duplicate the commits.")).color(t.warning));
+            }
+            ui.add_space(10.0);
+            let w = ui.available_width();
+            let choice = |ui: &mut egui::Ui, label: String, note: String, fill: Option<egui::Color32>| -> bool {
+                let text = RichText::new(label).strong().color(if fill.is_some() { egui::Color32::WHITE } else { t.text });
+                let mut b = egui::Button::new(text).min_size(egui::vec2(w, 30.0));
+                if let Some(f) = fill {
+                    b = b.fill(f);
+                }
+                let r = ui.add(b);
+                ui.label(RichText::new(note).small().color(t.dim));
+                ui.add_space(6.0);
+                r.clicked()
+            };
+            let params = |mode: &str| json!({"name": remote.clone(), "mode": mode});
+            let primary = Some(crate::theme::APP_COLOR);
+            let rebase_note = if rewritten {
+                format!("Your commits are already on {remote}: the branch becomes {remote}.")
+            } else {
+                format!("Replays your {unique} {} on top of {remote}.", plural(*unique))
+            };
+            if rewritten && choice(ui, format!("Rebase {local} onto {remote}"), rebase_note.clone(), primary) {
+                return Close::Run("branch.pullRemote".into(), params("rebase"));
+            }
+            let merge_fill = if rewritten { None } else { primary };
+            if choice(ui, format!("Merge {remote} into {local}"), "Keeps both histories with a merge commit (like git pull).".into(), merge_fill) {
+                return Close::Run("branch.pullRemote".into(), params("merge"));
+            }
+            if !rewritten && choice(ui, format!("Rebase {local} onto {remote}"), rebase_note, None) {
+                return Close::Run("branch.pullRemote".into(), params("rebase"));
+            }
+            if choice(
+                ui,
+                format!("Reset {local} to {remote}"),
+                format!("Drops your {ahead} local {} from the branch (uncommitted changes are kept).", plural(*ahead)),
+                Some(t.danger),
+            ) {
+                return Close::Run("branch.pullRemote".into(), params("reset"));
+            }
+            let cancel = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.button("Cancel").clicked()).inner;
+            if cancel || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                return Close::Cancel;
             }
         }
         Dialog::Shortcuts => {

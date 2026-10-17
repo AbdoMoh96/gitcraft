@@ -30,4 +30,4 @@ key file, or `GITCRAFT_CONTROL_KEY`, and sends it only to loopback addresses.
 | `ui.screenshot` | | `{"png": base64, "width", "height"}` of the window |
 | `ui.state` | | open dialog, palette, background jobs, status line, theme, recent repositories |
 | `ui.dialog` | `{"name": "branch.create" \| "tag.create" \| "repo.clone" \| …}` | opens a dialog |
-| `ui.closeDialog`, `ui.commandPalette`, `ui.theme` `{"value"}`, `ui.recent` `{"index"}`, `ui.revealRepo`, `ui.terminal` (open a terminal in the repository), `ui.copySha`, `ui.editMessage` `{"oid"?}` (open the message editor), `ui.dropMenu` `{"from", "onto", "x"?, "y"?}` (the menu shown after dragging a branch onto another), `ui.filterRefs` `{"text"}`, `ui.quit` | | |
+| `ui.closeDialog`, `ui.commandPalette`, `ui.theme` `{"value"}`, `ui.recent` `{"index"}`, `ui.revealRepo`, `ui.terminal` (open a terminal in the repository), `ui.copySha`, `ui.editMessage` `{"oid"?}` (open the message editor), `ui.dialog` `{"name": "diverged", "local", "remote", "ahead"?, "behind"?}`, `ui.dropMenu` `{"from", "onto", "x"?, "y"?}` (the menu shown after dragging a branch onto another), `ui.filterRefs` `{"text"}`, `ui.quit` | | |
