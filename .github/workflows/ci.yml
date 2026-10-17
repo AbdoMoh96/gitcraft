@@ -7,6 +7,9 @@ on:
 jobs:
   ci:
     strategy:
+      # One OS failing must not cancel the others (a cancelled job shows as exit 0xc000013a on
+      # Windows and hides whether that OS passes).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
