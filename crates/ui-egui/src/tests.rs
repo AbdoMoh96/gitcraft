@@ -119,3 +119,43 @@ fn every_view_lays_out() {
     a.run("repo.close", json!({})).unwrap();
     frame(&mut a);
 }
+
+/// Dragging a branch label onto another branch's row opens the drop menu.
+#[test]
+fn drag_a_branch_onto_another() {
+    let (_d, mut a) = app("ui-drag");
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let frame = |a: &mut GitApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+    };
+    frame(&mut a, vec![]);
+    frame(&mut a, vec![]);
+    let pill = |name: &str| {
+        let i = a.session.data.refs.iter().position(|r| r.name == name && r.kind == gitcraft_git::RefKind::Local).unwrap();
+        ctx.read_response(egui::Id::new(("pill", name.to_string(), i))).unwrap().rect.center()
+    };
+    let (from, to) = (pill("feature"), pill("main"));
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut a, vec![egui::Event::PointerMoved(from), button(from, true)]);
+    frame(&mut a, vec![egui::Event::PointerMoved(from + egui::vec2(0.0, -12.0))]);
+    frame(&mut a, vec![egui::Event::PointerMoved(to)]);
+    assert!(egui::DragAndDrop::has_any_payload(&ctx));
+    frame(&mut a, vec![button(to, false)]);
+    let m = a.drop_menu.clone().expect("the drop menu is open");
+    assert_eq!((m.from.as_str(), m.onto.as_str()), ("feature", "main"));
+    assert!(m.options.iter().any(|o| o.1 == "merge"));
+    frame(&mut a, vec![egui::Event::PointerMoved(to + egui::vec2(0.0, 40.0))]);
+    assert!(a.drop_menu.is_some());
+    a.run("branch.dropOnto", json!({"from": m.from, "onto": m.onto, "action": "merge"})).unwrap();
+    assert!(a.session.repo().unwrap().is_ancestor("feature", "main"));
+}

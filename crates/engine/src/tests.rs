@@ -83,16 +83,16 @@ fn stage_commit_undo_redo() {
     assert_eq!(s.data.commits.len(), 5);
     // Edit an older commit's message, then undo and redo it.
     let head = s.data.status.head.clone();
-    let older = s.data.commits[2].oid.clone();
+    let older = s.repo().unwrap().resolve("HEAD~1").unwrap();
     let r = run(&mut s, "commit.reword", json!({"oid": older, "summary": "Reworded", "description": "Body"}));
     let new = r["oid"].as_str().unwrap().to_string();
-    assert_eq!(s.data.commits[2].oid, new);
-    assert_eq!(s.data.commits[2].message(), "Reworded\n\nBody");
-    assert_eq!(s.sel.row, Selected::Commit(new));
+    assert_eq!(s.data.commit(&new).unwrap().message(), "Reworded\n\nBody");
+    assert!(s.data.commit(&older).is_none());
+    assert_eq!(s.sel.row, Selected::Commit(new.clone()));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.data.status.head, head);
     run(&mut s, "edit.redo", json!({}));
-    assert_eq!(s.data.commits[2].summary, "Reworded");
+    assert!(s.data.commit(&new).is_some());
     assert!(s.run("commit.reword", &json!({"oid": older, "summary": " "})).is_err());
 }
 
@@ -290,5 +290,43 @@ fn hostile_params_never_panic() {
                 assert!(!e.to_string().contains("internal error"), "{id} {p}: {e}");
             }
         }
+    }
+}
+
+#[test]
+fn drag_branch_onto_branch() {
+    let (_d, mut s) = session("eng-drop");
+    let repo = s.repo.clone().unwrap();
+    let head = repo.resolve("main").unwrap();
+    run(&mut s, "branch.create", json!({"name": "behind", "from": "main~1", "checkout": false}));
+    run(&mut s, "branch.create", json!({"name": "other", "from": "main~1", "checkout": false}));
+    // Fast-forward a branch that is not checked out, then undo and redo it.
+    run(&mut s, "branch.dropOnto", json!({"from": "main", "onto": "behind", "action": "fastForward"}));
+    assert_eq!(repo.resolve("behind").as_deref(), Some(head.as_str()));
+    run(&mut s, "edit.undo", json!({}));
+    assert_ne!(repo.resolve("behind").as_deref(), Some(head.as_str()));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(repo.resolve("behind").as_deref(), Some(head.as_str()));
+    run(&mut s, "edit.undo", json!({}));
+    // Merge into the checked-out branch.
+    run(&mut s, "branch.dropOnto", json!({"from": "feature", "onto": "main", "action": "merge"}));
+    assert!(repo.is_ancestor("feature", "main"));
+    // Rebase a branch that is not checked out: it is checked out first.
+    run(&mut s, "branch.dropOnto", json!({"from": "behind", "onto": "main", "action": "rebase"}));
+    assert_eq!(s.data.status.branch.as_deref(), Some("behind"));
+    assert!(repo.is_ancestor("main", "behind"));
+    // Merge into a branch that is not checked out: it is checked out first.
+    run(&mut s, "branch.dropOnto", json!({"from": "feature", "onto": "other", "action": "merge"}));
+    assert_eq!(s.data.status.branch.as_deref(), Some("other"));
+    assert!(repo.is_ancestor("feature", "other"));
+    for bad in [
+        json!({"from": "main", "onto": "main", "action": "merge"}),
+        json!({"from": "main", "onto": "nope", "action": "merge"}),
+        json!({"from": "v0.1.0", "onto": "main", "action": "rebase"}),
+        json!({"from": "main", "onto": "behind", "action": "squash"}),
+        json!({"from": "v0.1.0", "onto": "main", "action": "fastForward"}),
+        json!({"from": "-x", "onto": "behind", "action": "merge"}),
+    ] {
+        assert!(s.run("branch.dropOnto", &bad).is_err(), "{bad}");
     }
 }

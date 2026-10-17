@@ -129,6 +129,8 @@ pub struct GitApp {
     pub reword: Option<Reword>,
     /// Gravatar pictures of commit authors.
     pub avatars: avatars::Avatars,
+    /// The menu after dropping a branch on another one in the graph.
+    pub drop_menu: Option<graph_view::DropMenu>,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -171,6 +173,7 @@ impl GitApp {
             pending_copy: None,
             reword: None,
             avatars,
+            drop_menu: None,
         }
     }
 
@@ -393,6 +396,22 @@ impl GitApp {
                 self.run("graph.select", json!({"oid": c.oid}))?;
                 self.reword = Some(Reword { oid: c.oid.clone(), summary: c.summary.clone(), description: c.body.trim().to_string(), focus: true });
                 Ok(json!({"oid": c.oid}))
+            }
+            "ui.dropMenu" => {
+                let from = s("from").ok_or("`from` is required")?.to_string();
+                let onto = s("onto").ok_or("`onto` is required")?.to_string();
+                if !self.session.data.local_branches().any(|r| r.name == onto) || from == onto {
+                    return Err(format!("`{onto}` is not another local branch"));
+                }
+                let at = egui::pos2(
+                    v.get("x").and_then(Value::as_f64).unwrap_or(420.0) as f32,
+                    v.get("y").and_then(Value::as_f64).unwrap_or(160.0) as f32,
+                );
+                let m = graph_view::DropMenu::new(self, from, onto, at);
+                let options: Vec<&str> = m.options.iter().map(|o| o.1).collect();
+                let r = json!({"options": options});
+                self.drop_menu = Some(m);
+                Ok(r)
             }
             "ui.filterRefs" => {
                 self.ref_filter = s("text").unwrap_or("").chars().take(200).collect();

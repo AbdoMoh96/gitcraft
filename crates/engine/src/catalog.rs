@@ -56,6 +56,7 @@ Graph|Commit Menu|Edit Commit Message|commit.reword
 Graph|Commit Menu|Squash Commits|commit.squash
 Graph|Commit Menu|Drop Commit|commit.drop
 Graph|Commit Menu|Compare Commits|diff.compare
+Graph|Drag and Drop|Drag a Branch onto a Branch (merge, rebase, fast-forward)|branch.dropOnto
 Branches|Menu|Checkout Branch|branch.checkout
 Branches|Menu|Merge into Current Branch|merge.into
 Branches|Menu|Fast-forward|merge.fastForward

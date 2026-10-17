@@ -346,6 +346,12 @@ impl Repo {
         self.conflicting(&args)
     }
 
+    /// Whether `ancestor` is `descendant` or one of its ancestors.
+    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
+        let (Ok(a), Ok(d)) = (check_name("revision", ancestor), check_name("revision", descendant)) else { return false };
+        self.run(&["merge-base", "--is-ancestor", a, d]).is_ok_and(|o| o.ok())
+    }
+
     pub fn merge_abort(&self) -> Result<()> {
         self.run_ok(&["merge", "--abort"]).map(|_| ())
     }

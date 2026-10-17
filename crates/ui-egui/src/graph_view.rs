@@ -135,6 +135,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     }
     let search = app.session.view.search.to_lowercase();
     let mut actions: Vec<Action> = Vec::new();
+    let dragging = egui::DragAndDrop::payload::<DragRef>(ui.ctx());
     let out = area.show_rows(ui, ROW_H, n, |ui, range| {
         let now = util::now_s();
         let d = &app.session.data;
@@ -200,13 +201,29 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 // Labels.
                 let ls = labels(d, &commit.oid);
                 if !ls.is_empty() {
-                    pills(ui, cols.refs, &ls, fade(lane_color(row.color)));
+                    if let Some(pr) = pills(ui, cols.refs, &ls, fade(lane_color(row.color))) {
+                        pill_events(app, &pr, &ls, commit, &mut actions);
+                    }
                     // A line from the label to the commit.
                     let y = rect.center().y;
                     p.line_segment(
                         [pos2(cols.refs.right() - 2.0, y), pos2(lane_x(cols.graph, row.lane) - 8.0, y)],
                         Stroke::new(1.0, fade(lane_color(row.color))),
                     );
+                }
+            }
+            if let Some(dr) = &dragging
+                && ui.rect_contains_pointer(rect)
+            {
+                let target = labels(d, &commit.oid).into_iter().find(|l| l.local && l.text != dr.name);
+                if let Some(target) = target {
+                    p.rect_stroke(rect.shrink(1.0), 4.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+                    if ui.input(|i| i.pointer.any_released()) {
+                        let at = ui.input(|i| i.pointer.interact_pos()).unwrap_or(rect.center());
+                        actions.push(Action::DropMenu(dr.name.clone(), target.text, at));
+                    }
+                } else {
+                    p.rect_filled(rect, 0.0, t.hover);
                 }
             }
             let msg_color = fade(t.text);
@@ -238,14 +255,124 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         }
     });
     ui.ctx().data_mut(|m| m.insert_temp(offset_key, out.state.offset.y));
+    if let Some(dr) = &dragging {
+        drag_ghost(ui.ctx(), &dr.name);
+    }
     for a in actions {
         a.apply(app);
     }
+    drop_menu(app, ui.ctx());
+}
+
+/// A branch, remote branch or tag being dragged from a label.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DragRef {
+    pub name: String,
+}
+
+/// What can be done by dropping `from` onto local branch `onto`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropMenu {
+    pub from: String,
+    pub onto: String,
+    pub at: Pos2,
+    /// (label, `branch.dropOnto` action, hover note).
+    pub options: Vec<(String, &'static str, Option<String>)>,
+}
+
+impl DropMenu {
+    pub fn new(app: &GitApp, from: String, onto: String, at: Pos2) -> DropMenu {
+        let d = &app.session.data;
+        let current = d.status.branch.as_deref();
+        let from_local = d.local_branches().any(|r| r.name == from);
+        let mut options = Vec::new();
+        if let Some(repo) = &app.session.repo {
+            let (f, o) = (repo.resolve(&from), repo.resolve(&format!("refs/heads/{onto}")));
+            if let (Some(f), Some(o)) = (f, o)
+                && f != o
+                && repo.is_ancestor(&o, &f)
+            {
+                options.push((format!("Fast-forward {onto} to {from}"), "fastForward", None));
+            }
+        }
+        let first = |b: &str| (current != Some(b)).then(|| format!("Checks out {b} first"));
+        options.push((format!("Merge {from} into {onto}"), "merge", first(&onto)));
+        if from_local {
+            options.push((format!("Rebase {from} onto {onto}"), "rebase", first(&from)));
+        }
+        DropMenu { from, onto, at, options }
+    }
+}
+
+/// The dragged label following the pointer.
+fn drag_ghost(ctx: &egui::Context, name: &str) {
+    let Some(pos) = ctx.pointer_hover_pos() else { return };
+    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+    let t = Tokens::get(ctx);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("drag_ref_ghost")));
+    let g = p.layout_no_wrap(name.to_string(), FontId::proportional(11.5), Color32::WHITE);
+    let r = Rect::from_min_size(pos + vec2(14.0, 6.0), g.size() + vec2(16.0, 8.0));
+    p.rect_filled(r, 4.0, t.accent.gamma_multiply(0.9));
+    p.galley(r.min + vec2(8.0, 4.0), g, Color32::WHITE);
+}
+
+/// The menu shown where a label was dropped on another branch.
+fn drop_menu(app: &mut GitApp, ctx: &egui::Context) {
+    let Some(m) = app.drop_menu.clone() else { return };
+    let mut pick: Option<&'static str> = None;
+    let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    let area = egui::Area::new(egui::Id::new("drop_menu")).order(egui::Order::Foreground).fixed_pos(m.at).constrain(true).show(ctx, |ui| {
+        egui::Frame::menu(ui.style()).show(ui, |ui| {
+            let w = 240.0;
+            ui.set_width(w);
+            ui.label(egui::RichText::new(format!("{} dropped on {}", m.from, m.onto)).small().weak());
+            ui.separator();
+            for (label, action, note) in &m.options {
+                let b = ui.add(egui::Button::new(label.as_str()).frame_when_inactive(false).min_size(vec2(w, 0.0)));
+                let b = match note {
+                    Some(n) => b.on_hover_text(n.as_str()),
+                    None => b,
+                };
+                if b.clicked() {
+                    pick = Some(action);
+                }
+            }
+            ui.separator();
+            if ui.add(egui::Button::new("Cancel").frame_when_inactive(false).min_size(vec2(w, 0.0))).clicked() {
+                close = true;
+            }
+        });
+    });
+    if area.response.clicked_elsewhere() {
+        close = true;
+    }
+    if let Some(action) = pick {
+        app.drop_menu = None;
+        let _ = app.run("branch.dropOnto", json!({"from": m.from, "onto": m.onto, "action": action}));
+    } else if close {
+        app.drop_menu = None;
+    }
+}
+
+/// Clicks, double-clicks, right-clicks and drags on a row's label.
+fn pill_events(app: &GitApp, r: &egui::Response, ls: &[Label], commit: &Commit, actions: &mut Vec<Action>) {
+    let Some(first) = ls.first() else { return };
+    r.dnd_set_drag_payload(DragRef { name: first.text.clone() });
+    if r.clicked() {
+        actions.push(Action::Run("graph.select", json!({"oid": commit.oid})));
+    }
+    if r.double_clicked()
+        && let Some(l) = ls.iter().find(|l| l.local && !l.head)
+    {
+        actions.push(Action::Run("branch.checkout", json!({"name": l.text})));
+    }
+    r.context_menu(|ui| commit_menu(app, ui, commit, actions));
 }
 
 enum Action {
     Run(&'static str, serde_json::Value),
     Reword(Reword),
+    DropMenu(String, String, Pos2),
     Dialog(Dialog),
     Copy(String),
 }
@@ -257,6 +384,9 @@ impl Action {
                 let _ = app.run(id, p);
             }
             Action::Dialog(d) => app.dialog = Some(d),
+            Action::DropMenu(from, onto, at) => {
+                app.drop_menu = Some(DropMenu::new(app, from, onto, at));
+            }
             Action::Reword(r) => {
                 if app.run("graph.select", json!({"oid": r.oid})).is_ok() {
                     app.reword = Some(r);
@@ -412,9 +542,10 @@ fn author_cell(p: &egui::Painter, avatars: &Avatars, r: Rect, c: &Commit, fade: 
 }
 
 /// The row's labels: the first as a pill (with local / remote / tag marks), the rest counted.
-fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) {
+/// The pill can be clicked, right-clicked and dragged.
+fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) -> Option<egui::Response> {
     let p = ui.painter();
-    let Some(first) = ls.first() else { return };
+    let first = ls.first()?;
     let h = 20.0;
     let mut text = first.text.clone();
     if ls.len() > 1 {
@@ -437,10 +568,12 @@ fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) {
         }
     }
     p.with_clip_rect(pill.shrink(2.0)).galley(pos2(x + 2.0, pill.center().y - g.size().y / 2.0), g, Color32::WHITE);
-    if ls.len() > 1 {
-        let all: Vec<&str> = ls.iter().map(|l| l.text.as_str()).collect();
-        ui.interact(pill, egui::Id::new(("pill", &first.text, first.target)), Sense::hover()).on_hover_text(all.join("\n"));
+    let resp = ui.interact(pill, egui::Id::new(("pill", &first.text, first.target)), Sense::click_and_drag());
+    let tip = if ls.len() > 1 { ls.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n") } else { first.text.clone() };
+    if resp.hovered() && !resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
+    Some(resp.on_hover_text(format!("{tip}\n\nDrag onto another branch to merge or rebase")))
 }
 
 fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Action>) {

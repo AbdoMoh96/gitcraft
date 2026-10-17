@@ -58,6 +58,12 @@ pub enum UndoStep {
         before: String,
         after: String,
     },
+    /// A branch that is not checked out moved (fast-forwarded) from `before` to `after`.
+    RefMove {
+        name: String,
+        before: String,
+        after: String,
+    },
     /// Several steps taken as one (create a branch and check it out).
     Many(String, Vec<UndoStep>),
 }
@@ -78,6 +84,16 @@ fn go(repo: &Repo, h: &Head) -> Result<(), GitError> {
         Head::Branch(b) => repo.checkout_branch(b),
         Head::Detached(o) => repo.checkout_detached(o),
     }
+}
+
+/// Move local branch `name` from `from` to `to`, if it is still at `from`.
+fn move_ref(repo: &Repo, name: &str, from: &str, to: &str) -> Result<(), CmdError> {
+    let full = format!("refs/heads/{name}");
+    if repo.resolve(&full).as_deref() != Some(from) {
+        return Err(changed());
+    }
+    repo.run_ok(&["update-ref", "-m", "gitcraft: undo/redo", full.as_str(), to, from])?;
+    Ok(())
 }
 
 fn reset_flag(mode: ResetMode) -> &'static str {
@@ -103,6 +119,7 @@ impl UndoStep {
             UndoStep::TagDelete { name, .. } => format!("Delete tag {name}"),
             UndoStep::Reset { .. } => "Reset".into(),
             UndoStep::Reword { .. } => "Edit commit message".into(),
+            UndoStep::RefMove { name, .. } => format!("Fast-forward {name}"),
             UndoStep::Many(label, _) => label.clone(),
         }
     }
@@ -143,6 +160,7 @@ impl UndoStep {
                 head_is(repo, after)?;
                 repo.run_ok(&["update-ref", "-m", "gitcraft: undo edit commit message", "HEAD", before.as_str(), after.as_str()])?;
             }
+            UndoStep::RefMove { name, before, after } => move_ref(repo, name, after, before)?,
             UndoStep::Many(_, steps) => {
                 for st in steps.iter().rev() {
                     st.undo(repo)?;
@@ -186,6 +204,7 @@ impl UndoStep {
                 head_is(repo, before)?;
                 repo.run_ok(&["update-ref", "-m", "gitcraft: redo edit commit message", "HEAD", after.as_str(), before.as_str()])?;
             }
+            UndoStep::RefMove { name, before, after } => move_ref(repo, name, before, after)?,
             UndoStep::Many(_, steps) => {
                 for st in steps {
                     st.redo(repo)?;

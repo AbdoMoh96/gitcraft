@@ -18,6 +18,10 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
   `commit-tree`, keeping trees, authors and dates, without touching the index or work tree.
   Gravatar author pictures on graph dots, the author column and commit details, cached on disk for a
   week (Preferences toggle); hovering a dot shows the author's card.
+- **2026-10-17 — M1.** Drag and drop branches in the graph (`branch.dropOnto`): drag a label onto
+  another branch's row and pick Fast-forward (when possible), Merge or Rebase from the menu; the
+  branch being changed is checked out first; fast-forwarding a branch that isn't checked out is
+  undoable.
 - **2026-10-17 — M1.** Workspace in the WordCraft layout (control-key, git, graph, engine, mcp,
   ui-egui, apps, xtask). Clean-room inventory of the target (`docs/clean-room.md`). git layer with
   parsers for status v2, log, refs, diffs, blame, stashes, remotes and hunk/line patches; operations
