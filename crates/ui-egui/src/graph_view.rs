@@ -9,9 +9,10 @@ use gitcraft_engine::graph::Seg;
 use gitcraft_engine::{RepoData, Selected};
 use serde_json::json;
 
+use crate::avatars::Avatars;
 use crate::icons::{self, Icon};
 use crate::theme::{Tokens, lane_color};
-use crate::{Dialog, GitApp, util};
+use crate::{Dialog, GitApp, Reword, util};
 
 pub const ROW_H: f32 = 28.0;
 const LANE_W: f32 = 16.0;
@@ -161,6 +162,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 }
                 continue;
             };
+            let mut over_node = false;
             let dim = !search.is_empty() && !gitcraft_engine::cmd::view::matches(commit, &search);
             let fade = |c: Color32| if dim { c.gamma_multiply(0.35) } else { c };
             // Lanes.
@@ -181,14 +183,20 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     }
                 }
                 lanes(&gp, cols.graph, rect, &row.up, &row.down, &fade);
+                let at = pos2(lane_x(cols.graph, row.lane), rect.center().y);
                 node(
                     &gp,
-                    pos2(lane_x(cols.graph, row.lane), rect.center().y),
+                    &app.avatars,
+                    at,
                     commit,
                     fade(lane_color(row.color)),
                     d.status.head.as_deref() == Some(commit.oid.as_str()),
+                    fade(Color32::WHITE),
                     t,
                 );
+                if !commit.is_merge() && resp.hover_pos().is_some_and(|h| h.distance(at) <= NODE_R + 2.0) {
+                    over_node = true;
+                }
                 // Labels.
                 let ls = labels(d, &commit.oid);
                 if !ls.is_empty() {
@@ -203,7 +211,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             }
             let msg_color = fade(t.text);
             text_in(&p, cols.msg, &commit.summary, FontId::proportional(13.0), msg_color);
-            author_cell(&p, cols.author, commit, &fade, t);
+            author_cell(&p, &app.avatars, cols.author, commit, &fade, t);
             text_in(&p, cols.date, &util::relative_time(commit.author.time, now), FontId::proportional(12.0), fade(t.dim));
             text_in(&p, cols.sha, commit.short(), FontId::monospace(11.5), fade(t.dim));
             if resp.clicked() {
@@ -215,13 +223,17 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     actions.push(Action::Run("branch.checkout", json!({"name": l.text})));
                 }
             }
-            let resp = resp.on_hover_text_at_pointer(format!(
-                "{}\n{} <{}>\n{}",
-                commit.message(),
-                commit.author.name,
-                commit.author.email,
-                util::date_time(commit.author.time)
-            ));
+            let resp = if over_node {
+                resp.on_hover_ui_at_pointer(|ui| person_card(ui, &app.avatars, commit))
+            } else {
+                resp.on_hover_text_at_pointer(format!(
+                    "{}\n{} <{}>\n{}",
+                    commit.message(),
+                    commit.author.name,
+                    commit.author.email,
+                    util::date_time(commit.author.time)
+                ))
+            };
             resp.context_menu(|ui| commit_menu(app, ui, commit, &mut actions));
         }
     });
@@ -233,6 +245,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
 
 enum Action {
     Run(&'static str, serde_json::Value),
+    Reword(Reword),
     Dialog(Dialog),
     Copy(String),
 }
@@ -244,6 +257,11 @@ impl Action {
                 let _ = app.run(id, p);
             }
             Action::Dialog(d) => app.dialog = Some(d),
+            Action::Reword(r) => {
+                if app.run("graph.select", json!({"oid": r.oid})).is_ok() {
+                    app.reword = Some(r);
+                }
+            }
             Action::Copy(s) => app.copy(s),
         }
     }
@@ -352,24 +370,44 @@ fn lanes(p: &egui::Painter, graph: Rect, row: Rect, up: &[Seg], down: &[Seg], fa
     }
 }
 
-/// A commit's dot: the author's initials on the lane colour; merges are small; HEAD gets a ring.
-fn node(p: &egui::Painter, c: Pos2, commit: &Commit, color: Color32, head: bool, t: Tokens) {
+/// A commit dot's radius (merges are smaller).
+const NODE_R: f32 = 10.0;
+
+/// A commit's dot: the author's picture (or initials) ringed in the lane colour; merges are small;
+/// HEAD gets an outer ring.
+fn node(p: &egui::Painter, avatars: &Avatars, c: Pos2, commit: &Commit, color: Color32, head: bool, tint: Color32, t: Tokens) {
     if commit.is_merge() {
         p.circle_filled(c, 5.0, color);
         p.circle_stroke(c, 5.0, Stroke::new(1.5, t.bg));
     } else {
-        p.circle_filled(c, 9.0, color);
-        p.text(c, Align2::CENTER_CENTER, util::initials(&commit.author.name), FontId::proportional(8.5), crate::theme::on_lane());
+        p.circle_filled(c, NODE_R, color);
+        if !avatars.paint(p, c, NODE_R - 2.0, &commit.author.email, tint) {
+            p.text(c, Align2::CENTER_CENTER, util::initials(&commit.author.name), FontId::proportional(8.5), crate::theme::on_lane());
+        }
     }
     if head {
-        p.circle_stroke(c, if commit.is_merge() { 8.0 } else { 11.5 }, Stroke::new(1.5, t.accent));
+        p.circle_stroke(c, if commit.is_merge() { 8.0 } else { NODE_R + 2.5 }, Stroke::new(1.5, t.accent));
     }
 }
 
-fn author_cell(p: &egui::Painter, r: Rect, c: &Commit, fade: &dyn Fn(Color32) -> Color32, t: Tokens) {
+/// The hover card over a commit's dot: the author's picture, name and address.
+fn person_card(ui: &mut egui::Ui, avatars: &Avatars, c: &Commit) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
+        avatars.paint_or_initials(ui.painter(), r.center(), 32.0, &c.author.email, &c.author.name, Color32::WHITE);
+        ui.vertical(|ui| {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(&c.author.name).strong().size(14.0));
+            ui.label(egui::RichText::new(&c.author.email).small().color(t.dim));
+            ui.label(egui::RichText::new(util::date_time(c.author.time)).small().color(t.dim));
+        });
+    });
+}
+
+fn author_cell(p: &egui::Painter, avatars: &Avatars, r: Rect, c: &Commit, fade: &dyn Fn(Color32) -> Color32, t: Tokens) {
     let center = pos2(r.left() + 14.0, r.center().y);
-    p.circle_filled(center, 8.0, fade(util::person_color(&c.author.name)));
-    p.text(center, Align2::CENTER_CENTER, util::initials(&c.author.name), FontId::proportional(8.0), Color32::WHITE);
+    avatars.paint_or_initials(p, center, 8.0, &c.author.email, &c.author.name, fade(Color32::WHITE));
     text_in(p, Rect::from_min_max(pos2(r.left() + 20.0, r.top()), r.max), &c.author.name, FontId::proportional(12.0), fade(t.text));
 }
 
@@ -446,6 +484,10 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
     }
     if item(ui, "tag.create", "Create Tag Here…") {
         actions.push(Action::Dialog(Dialog::CreateTag { name: String::new(), oid: Some(c.oid.clone()), message: String::new() }));
+        ui.close();
+    }
+    if item(ui, "commit.reword", "Edit Commit Message") {
+        actions.push(Action::Reword(Reword { oid: c.oid.clone(), summary: c.summary.clone(), description: c.body.trim().to_string(), focus: true }));
         ui.close();
     }
     ui.separator();

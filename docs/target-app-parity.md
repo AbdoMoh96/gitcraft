@@ -14,7 +14,7 @@ Measured: **86 of 123** catalogued features (69.9%), see `docs/parity-checklist.
 - Automation: every action is a command, reachable from CLI, control channel and MCP.
 
 ## Missing (ranked in `docs/gaps.md`)
-- Interactive rebase (reorder, squash, reword, drop), editing old commit messages.
+- Interactive rebase (reorder, squash, drop). Editing any commit message on the current branch works.
 - A three-way merge output editor (today: take a side or edit the file elsewhere, then mark resolved).
 - Repository tabs and workspaces; profiles and author identity editing.
 - Submodules, worktrees, Git LFS, Git Flow, hooks list, patches.

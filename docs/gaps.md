@@ -4,7 +4,8 @@ Status: M1 · Revision 1 (2026-10-17)
 
 Highest value first. Each item names the catalog ids it fills (`docs/parity-checklist.md`).
 
-1. **Interactive rebase** — `rebase.interactive`, `commit.reword`, `commit.squash`, `commit.drop`: a
+1. **Interactive rebase** — `rebase.interactive`, `commit.squash`, `commit.drop` (`commit.reword` landed: it
+   re-creates commits with `commit-tree`, no rebase needed): a
    todo list editor driven by `GIT_SEQUENCE_EDITOR` writing a prepared todo file.
 2. **Merge tool output editor** — `conflict.edit`: three panes (ours, theirs, output) from
    `conflict.versions`, chunk pickers, save + mark resolved.

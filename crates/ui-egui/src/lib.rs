@@ -6,6 +6,7 @@
 //! Network commands (`CommandSpec::slow`) run on a background thread so the window stays live.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod avatars;
 pub mod commit_panel;
 pub mod control;
 pub mod dialogs;
@@ -34,6 +35,8 @@ pub use theme::Appearance;
 pub struct Services {
     /// Ask the user for a folder (blocking); `None` when cancelled or unavailable.
     pub pick_folder: Option<Box<dyn Fn(&str) -> Option<PathBuf>>>,
+    /// Folder for downloaded author pictures; `None` turns Gravatar off (tests, headless shots).
+    pub avatar_cache: Option<PathBuf>,
 }
 
 /// Preferences kept between runs (`ui.json` in the settings folder).
@@ -47,11 +50,13 @@ pub struct Prefs {
     pub reopen_last: bool,
     pub context_lines: u32,
     pub commit_limit: usize,
+    /// Show authors' Gravatar pictures (their e-mail's hash is sent to gravatar.com).
+    pub gravatar: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { appearance: Appearance::System, recent: Vec::new(), reopen_last: true, context_lines: 3, commit_limit: 2000 }
+        Prefs { appearance: Appearance::System, recent: Vec::new(), reopen_last: true, context_lines: 3, commit_limit: 2000, gravatar: true }
     }
 }
 
@@ -120,6 +125,20 @@ pub struct GitApp {
     pub details: Option<((String, u64), Result<Value, String>)>,
     /// Text to put on the clipboard on the next frame.
     pending_copy: Option<String>,
+    /// A commit message being edited in the commit panel.
+    pub reword: Option<Reword>,
+    /// Gravatar pictures of commit authors.
+    pub avatars: avatars::Avatars,
+}
+
+/// The commit panel's message editor for an existing commit.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reword {
+    pub oid: String,
+    pub summary: String,
+    pub description: String,
+    /// Put the keyboard in the summary on the next frame.
+    pub focus: bool,
 }
 
 /// How often to look for changes made outside GitCraft while the window has focus.
@@ -127,6 +146,7 @@ const CHECK_EVERY_S: f64 = 3.0;
 
 impl GitApp {
     pub fn new(session: Session, prefs: Prefs, services: Services) -> Self {
+        let avatars = avatars::Avatars::new(services.avatar_cache.clone().filter(|_| prefs.gravatar));
         let mut s = session;
         s.view.context = prefs.context_lines.min(100);
         s.view.commit_limit = prefs.commit_limit.clamp(100, 100_000);
@@ -149,6 +169,8 @@ impl GitApp {
             blame: None,
             details: None,
             pending_copy: None,
+            reword: None,
+            avatars,
         }
     }
 
@@ -358,6 +380,20 @@ impl GitApp {
                 self.status(format!("Copied {}", oid.get(..7).unwrap_or(&oid)), false);
                 Ok(json!({"oid": oid}))
             }
+            "ui.editMessage" => {
+                if let Some(why) = self.disabled("commit.reword") {
+                    return Err(why.into());
+                }
+                let oid = s("oid").map(str::to_string).or_else(|| match &self.session.sel.row {
+                    gitcraft_engine::Selected::Commit(o) => Some(o.clone()),
+                    _ => self.session.data.status.head.clone(),
+                });
+                let oid = oid.ok_or("select a commit")?;
+                let c = self.session.data.commit(&oid).cloned().ok_or("the commit is not in the graph")?;
+                self.run("graph.select", json!({"oid": c.oid}))?;
+                self.reword = Some(Reword { oid: c.oid.clone(), summary: c.summary.clone(), description: c.body.trim().to_string(), focus: true });
+                Ok(json!({"oid": c.oid}))
+            }
             "ui.filterRefs" => {
                 self.ref_filter = s("text").unwrap_or("").chars().take(200).collect();
                 Ok(json!({"text": self.ref_filter}))
@@ -393,6 +429,7 @@ impl GitApp {
         ctx.set_theme(self.prefs.appearance.preference());
         self.poll_jobs();
         self.poll_control(ctx);
+        self.avatars.poll(ctx);
         if let Some(text) = self.pending_copy.take() {
             ctx.copy_text(text);
         }
@@ -483,7 +520,7 @@ impl GitApp {
             if spec.shortcut.is_empty() {
                 continue;
             }
-            if typing && !matches!(spec.id, "commit.create" | "commit.stageAllAndCommit") {
+            if typing && (self.reword.is_some() || !matches!(spec.id, "commit.create" | "commit.stageAllAndCommit")) {
                 continue;
             }
             for k in spec.shortcut.split(" / ") {

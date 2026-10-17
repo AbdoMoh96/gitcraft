@@ -53,6 +53,11 @@ pub enum UndoStep {
         after: String,
         mode: ResetMode,
     },
+    /// A commit message edited: HEAD's branch moved from `before` to `after`.
+    Reword {
+        before: String,
+        after: String,
+    },
     /// Several steps taken as one (create a branch and check it out).
     Many(String, Vec<UndoStep>),
 }
@@ -97,6 +102,7 @@ impl UndoStep {
             UndoStep::TagCreate { name, .. } => format!("Create tag {name}"),
             UndoStep::TagDelete { name, .. } => format!("Delete tag {name}"),
             UndoStep::Reset { .. } => "Reset".into(),
+            UndoStep::Reword { .. } => "Edit commit message".into(),
             UndoStep::Many(label, _) => label.clone(),
         }
     }
@@ -132,6 +138,10 @@ impl UndoStep {
             UndoStep::Reset { before, after, mode } => {
                 head_is(repo, after)?;
                 repo.run_ok(&["reset", "-q", reset_flag(*mode), before.as_str()])?;
+            }
+            UndoStep::Reword { before, after } => {
+                head_is(repo, after)?;
+                repo.run_ok(&["update-ref", "-m", "gitcraft: undo edit commit message", "HEAD", before.as_str(), after.as_str()])?;
             }
             UndoStep::Many(_, steps) => {
                 for st in steps.iter().rev() {
@@ -171,6 +181,10 @@ impl UndoStep {
             UndoStep::Reset { before, after, mode } => {
                 head_is(repo, before)?;
                 repo.run_ok(&["reset", "-q", reset_flag(*mode), after.as_str()])?;
+            }
+            UndoStep::Reword { before, after } => {
+                head_is(repo, before)?;
+                repo.run_ok(&["update-ref", "-m", "gitcraft: redo edit commit message", "HEAD", after.as_str(), before.as_str()])?;
             }
             UndoStep::Many(_, steps) => {
                 for st in steps {

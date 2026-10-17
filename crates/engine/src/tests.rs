@@ -81,6 +81,19 @@ fn stage_commit_undo_redo() {
     let r = run(&mut s, "commit.create", json!({"summary": "Notes, amended"}));
     assert_eq!(s.data.commit(r["oid"].as_str().unwrap()).unwrap().summary, "Notes, amended");
     assert_eq!(s.data.commits.len(), 5);
+    // Edit an older commit's message, then undo and redo it.
+    let head = s.data.status.head.clone();
+    let older = s.data.commits[2].oid.clone();
+    let r = run(&mut s, "commit.reword", json!({"oid": older, "summary": "Reworded", "description": "Body"}));
+    let new = r["oid"].as_str().unwrap().to_string();
+    assert_eq!(s.data.commits[2].oid, new);
+    assert_eq!(s.data.commits[2].message(), "Reworded\n\nBody");
+    assert_eq!(s.sel.row, Selected::Commit(new));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.data.status.head, head);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.data.commits[2].summary, "Reworded");
+    assert!(s.run("commit.reword", &json!({"oid": older, "summary": " "})).is_err());
 }
 
 #[test]

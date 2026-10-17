@@ -112,6 +112,9 @@ fn activate(app: &mut GitApp, e: &Entry) {
                 app.dialog = Some(d);
             } else if id.starts_with("ui.") {
                 let _ = app.ui_command(id, &json!({}));
+            } else if *id == "commit.reword" {
+                // Edits the selected commit's message in the commit panel.
+                let _ = app.ui_command("ui.editMessage", &json!({}));
             } else {
                 let _ = app.run(id, json!({}));
             }

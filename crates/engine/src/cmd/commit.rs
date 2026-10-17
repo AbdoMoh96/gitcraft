@@ -64,6 +64,22 @@ fn create(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"message": format!("{} {short}", if amend_flag { "Amended" } else { "Committed" }), "oid": after}))
 }
 
+/// Edit the message of HEAD or a commit it descends from.
+fn reword(s: &mut Session, v: &Value) -> CmdResult {
+    let oid = p::str(v, "oid").ok_or_else(|| CmdError::Params("`oid` is required".into()))?;
+    let summary = p::str(v, "summary").unwrap_or("").trim();
+    if summary.is_empty() {
+        return Err(CmdError::Params("write a commit summary".into()));
+    }
+    let description = p::str(v, "description").unwrap_or("");
+    let msg = crate::CommitDraft { summary: summary.into(), description: description.into(), amend: false }.message();
+    let w = s.repo()?.reword(oid, &msg)?;
+    s.push_undo(UndoStep::Reword { before: w.before, after: w.after });
+    s.sel.row = Selected::Commit(w.commit.clone());
+    let short = w.commit.get(..7).unwrap_or(&w.commit).to_string();
+    Ok(json!({"message": format!("Edited the message of {short}"), "oid": w.commit}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("commit.message", "Commit Message", "Commit Panel", message)
@@ -73,6 +89,9 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("commit.amend", "Amend Previous Commit", "Commit Panel", amend)
             .params(r#"{"value"?: bool}"#)
             .pure()
+            .when(super::need_commits),
+        CommandSpec::new("commit.reword", "Edit Commit Message", "Graph › Commit Menu", reword)
+            .params(r#"{"oid": string, "summary": string, "description"?: string}"#)
             .when(super::need_commits),
         CommandSpec::new("commit.create", "Commit", "Commit Panel", create)
             .key("Mod+Enter")

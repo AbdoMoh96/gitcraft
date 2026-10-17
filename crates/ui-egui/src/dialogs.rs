@@ -356,6 +356,13 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 app.prefs.commit_limit = n;
             }
             ui.checkbox(&mut app.prefs.reopen_last, "Reopen the last repository at start");
+            if ui
+                .checkbox(&mut app.prefs.gravatar, "Show author pictures from Gravatar")
+                .on_hover_text("Sends a hash of each author's e-mail address to gravatar.com")
+                .changed()
+            {
+                app.avatars.set_enabled(app.prefs.gravatar);
+            }
             ui.add_space(6.0);
             let git = app.session.git.version().unwrap_or_else(|e| e.to_string());
             ui.label(RichText::new(git).small().weak());

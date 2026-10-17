@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
-use crate::{Dialog, GitApp, util};
+use crate::{Dialog, GitApp, Reword, util};
 
 /// Summary length the counter counts down from.
 const SUMMARY_LIMIT: i64 = 72;
@@ -358,18 +358,17 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
             }
         });
         ui.add_space(4.0);
-        ui.add(egui::Label::new(RichText::new(s(&c["summary"])).size(15.0).strong()).wrap());
-        let body = s(&c["body"]);
-        if !body.trim().is_empty() {
-            ui.add_space(4.0);
-            ui.add(egui::Label::new(RichText::new(body).size(12.5)).wrap().selectable(true));
+        let full = s(&c["oid"]);
+        if app.reword.as_ref().is_some_and(|r| r.oid == full) {
+            reword_form(app, ui, &mut run);
+        } else {
+            message_box(app, ui, &full, &s(&c["summary"]), &s(&c["body"]));
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             let name = s(&c["author"]["name"]);
             let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-            ui.painter().circle_filled(r.center(), 14.0, util::person_color(&name));
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, util::initials(&name), FontId::proportional(11.0), Color32::WHITE);
+            app.avatars.paint_or_initials(ui.painter(), r.center(), 14.0, &s(&c["author"]["email"]), &name, Color32::WHITE);
             ui.vertical(|ui| {
                 ui.label(RichText::new(format!("{name} <{}>", s(&c["author"]["email"]))).strong());
                 let time = c["author"]["time"].as_i64().unwrap_or(0);
@@ -434,7 +433,100 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
             });
         }
     });
-    if let Some((id, p)) = run {
-        let _ = app.run(id, p);
+    if let Some((id, p)) = run
+        && app.run(id, p).is_ok()
+        && id == "commit.reword"
+    {
+        app.reword = None;
     }
+}
+
+/// The commit's message; a click edits it.
+fn message_box(app: &mut GitApp, ui: &mut egui::Ui, oid: &str, summary: &str, body: &str) {
+    let t = Tokens::get(ui.ctx());
+    let why = app.disabled("commit.reword");
+    let out = Frame::NONE.fill(t.bg).corner_radius(6).inner_margin(Margin::same(8)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.add(egui::Label::new(RichText::new(summary).size(15.0).strong()).wrap());
+        if !body.trim().is_empty() {
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(RichText::new(body).size(12.5)).wrap());
+        }
+    });
+    let rect = out.response.rect;
+    let resp = ui.interact(rect, ui.id().with(("message", oid)), Sense::click());
+    if resp.hovered() && why.is_none() {
+        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        let pen = Rect::from_min_size(pos2(rect.right() - 22.0, rect.top() + 6.0), vec2(16.0, 16.0));
+        icons::paint(ui.painter(), pen, Icon::Pencil, t.dim, t.accent);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+    }
+    let resp = resp.on_hover_text(why.unwrap_or("Click to edit the commit message"));
+    if resp.clicked() && why.is_none() {
+        app.reword = Some(Reword { oid: oid.to_string(), summary: summary.to_string(), description: body.trim().to_string(), focus: true });
+    }
+    resp.context_menu(|ui| {
+        if ui.add_enabled(why.is_none(), egui::Button::new("Edit Commit Message")).clicked() {
+            app.reword = Some(Reword { oid: oid.to_string(), summary: summary.to_string(), description: body.trim().to_string(), focus: true });
+            ui.close();
+        }
+        if ui.button("Copy Commit Message").clicked() {
+            let msg = if body.trim().is_empty() { summary.to_string() } else { format!("{summary}\n\n{}", body.trim_end()) };
+            app.copy(msg);
+            ui.close();
+        }
+    });
+}
+
+/// The message editor for an existing commit: summary, description, update and cancel.
+fn reword_form(app: &mut GitApp, ui: &mut egui::Ui, run: &mut Option<(&'static str, Value)>) {
+    let t = Tokens::get(ui.ctx());
+    let Some(mut r) = app.reword.clone() else { return };
+    let mut submit = false;
+    let mut cancel = false;
+    Frame::NONE.fill(t.bg).corner_radius(6).inner_margin(Margin::same(8)).stroke(Stroke::new(1.0, t.accent)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let left = SUMMARY_LIMIT - r.summary.chars().count() as i64;
+        let s = ui.add(egui::TextEdit::singleline(&mut r.summary).hint_text("Summary").desired_width(f32::INFINITY).font(FontId::proportional(14.0)));
+        ui.painter().text(
+            pos2(s.rect.right() - 6.0, s.rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            left.to_string(),
+            FontId::proportional(10.5),
+            if left < 0 { t.danger } else { t.dim },
+        );
+        if r.focus {
+            s.request_focus();
+            r.focus = false;
+        }
+        let d = ui.add(egui::TextEdit::multiline(&mut r.description).hint_text("Description").desired_rows(4).desired_width(f32::INFINITY));
+        if s.has_focus() || d.has_focus() {
+            let (m, k) = util::parse_shortcut("Mod+Enter").unwrap_or((egui::Modifiers::COMMAND, egui::Key::Enter));
+            submit |= ui.input_mut(|i| i.consume_key(m, k));
+            cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        }
+    });
+    ui.add_space(6.0);
+    let can = !r.summary.trim().is_empty() && app.disabled("commit.reword").is_none();
+    ui.horizontal(|ui| {
+        let w = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(60.0);
+        let update = egui::Button::new(RichText::new("Update Message").color(Color32::WHITE).strong())
+            .fill(if can { crate::theme::APP_COLOR } else { t.dim })
+            .min_size(vec2(w, 30.0));
+        if ui.add_enabled(can, update).on_hover_text(util::shortcut_label("Mod+Enter")).clicked() {
+            submit = true;
+        }
+        let stop = egui::Button::new(RichText::new("Cancel").color(t.danger)).fill(t.danger.gamma_multiply(0.15)).min_size(vec2(w, 30.0));
+        if ui.add(stop).on_hover_text("Esc").clicked() {
+            cancel = true;
+        }
+    });
+    if cancel {
+        app.reword = None;
+        return;
+    }
+    if submit && can {
+        *run = Some(("commit.reword", json!({"oid": r.oid, "summary": r.summary, "description": r.description})));
+    }
+    app.reword = Some(r);
 }

@@ -159,7 +159,10 @@ fn main() -> std::process::ExitCode {
         options,
         Box::new(move |cc| {
             gitcraft_ui_egui::theme::style(&cc.egui_ctx);
-            let services = Services { pick_folder: Some(Box::new(|title: &str| rfd::FileDialog::new().set_title(title).pick_folder())) };
+            let services = Services {
+                pick_folder: Some(Box::new(|title: &str| rfd::FileDialog::new().set_title(title).pick_folder())),
+                avatar_cache: gitcraft_control_key::settings_dir().map(|d| d.join("avatars")),
+            };
             let mut app = GitApp::new(session, prefs, services);
             let mut key_file = None;
             if let Some(port) = port {

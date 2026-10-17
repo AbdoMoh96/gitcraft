@@ -5,6 +5,27 @@ use serde::Serialize;
 
 use crate::{GitError, Repo, Result, check_name, check_path};
 
+/// What [`Repo::reword`] did: HEAD before and after, and the edited commit's new id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reworded {
+    pub before: String,
+    pub after: String,
+    pub commit: String,
+}
+
+/// Commits re-created at most when editing an older commit's message.
+const MAX_REWRITE: usize = 10_000;
+
+/// `Name <email> 1700000000 +0200` → (name, email, date in git's internal format).
+fn parse_ident(v: &str) -> Option<(String, String, String)> {
+    let lt = v.find('<')?;
+    let gt = lt.checked_add(v.get(lt..)?.find('>')?)?;
+    let name = v.get(..lt)?.trim().to_string();
+    let email = v.get(lt.checked_add(1)?..gt)?.to_string();
+    let date = v.get(gt.checked_add(1)?..)?.trim().to_string();
+    Some((name, email, date))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResetMode {
     /// Move the branch; keep the index and work tree.
@@ -165,6 +186,95 @@ impl Repo {
         }
         self.run_input(&args, message.as_bytes())?;
         self.resolve("HEAD").ok_or_else(|| GitError::Parse("no HEAD after commit".into()))
+    }
+
+    /// Give `oid` (HEAD or a commit HEAD descends from) a new message. The commits after it are
+    /// re-created with the same trees, authors and author dates, and HEAD's branch moves to the
+    /// new tip. The index and work tree are left alone (every tree is unchanged).
+    pub fn reword(&self, oid: &str, message: &str) -> Result<Reworded> {
+        let message = message.trim_end();
+        if message.trim().is_empty() {
+            return Err(GitError::Arg("the commit message is empty".into()));
+        }
+        if message.len() > crate::MAX_ARG {
+            return Err(GitError::Arg("the commit message is too long".into()));
+        }
+        let oid = crate::check_oid(oid)?;
+        let target = self.resolve(oid).ok_or_else(|| GitError::Arg(format!("no commit `{oid}`")))?;
+        let head = self.resolve("HEAD").ok_or_else(|| GitError::Arg("there is no commit to edit".into()))?;
+        if self.state() != crate::RepoState::Clean {
+            return Err(GitError::Arg("finish or abort the operation in progress first".into()));
+        }
+        if !self.run(&["merge-base", "--is-ancestor", target.as_str(), head.as_str()])?.ok() {
+            return Err(GitError::Arg("only commits on the checked-out branch can be edited".into()));
+        }
+        let range = format!("{target}..{head}");
+        let list = self.text(&["rev-list", "--topo-order", "--reverse", "--ancestry-path", range.as_str()])?;
+        let after_target: Vec<&str> = list.split_whitespace().collect();
+        if after_target.len() > MAX_REWRITE {
+            return Err(GitError::Arg(format!("the commit has more than {MAX_REWRITE} commits after it")));
+        }
+        let mut map = std::collections::HashMap::new();
+        let new_target = self.recommit(&target, Some(message), &map)?;
+        map.insert(target.clone(), new_target.clone());
+        for c in after_target {
+            let new = self.recommit(c, None, &map)?;
+            map.insert(c.to_string(), new);
+        }
+        let after = map.get(&head).cloned().unwrap_or_else(|| new_target.clone());
+        self.run_ok(&["update-ref", "-m", "gitcraft: edit commit message", "HEAD", after.as_str(), head.as_str()])?;
+        Ok(Reworded { before: head, after, commit: new_target })
+    }
+
+    /// A copy of commit `oid` with its parents mapped through `map` and, when given, a new message.
+    fn recommit(&self, oid: &str, message: Option<&str>, map: &std::collections::HashMap<String, String>) -> Result<String> {
+        let oid = crate::check_oid(oid)?;
+        let raw = self.run_ok(&["cat-file", "commit", oid])?.stdout;
+        let split = raw.windows(2).position(|w| w == b"\n\n");
+        let (head, body) = match split {
+            Some(i) => (raw.get(..i).unwrap_or_default(), raw.get(i.saturating_add(2)..).unwrap_or_default()),
+            None => (raw.as_slice(), &[][..]),
+        };
+        let header = String::from_utf8_lossy(head);
+        let (mut tree, mut parents, mut author, mut encoding) = (None, Vec::new(), None, None);
+        for line in header.lines() {
+            if let Some(v) = line.strip_prefix("tree ") {
+                tree = Some(crate::check_oid(v)?.to_string());
+            } else if let Some(v) = line.strip_prefix("parent ") {
+                let p = crate::check_oid(v)?;
+                parents.push(map.get(p).cloned().unwrap_or_else(|| p.to_string()));
+            } else if let Some(v) = line.strip_prefix("author ") {
+                author = parse_ident(v);
+            } else if let Some(v) = line.strip_prefix("encoding ") {
+                encoding = Some(check_name("encoding", v)?.to_string());
+            }
+        }
+        let tree = tree.ok_or_else(|| GitError::Parse(format!("commit {oid} has no tree")))?;
+        let mut args: Vec<String> = Vec::new();
+        // A new message is UTF-8; an old one keeps the encoding it was written in.
+        if let (Some(e), None) = (&encoding, message) {
+            args.push("-c".into());
+            args.push(format!("i18n.commitEncoding={e}"));
+        }
+        args.push("commit-tree".into());
+        args.push(tree);
+        for p in parents {
+            args.push("-p".into());
+            args.push(p);
+        }
+        let mut git = self.git.clone();
+        if let Some((name, email, date)) = author {
+            git.env.push(("GIT_AUTHOR_NAME".into(), name));
+            git.env.push(("GIT_AUTHOR_EMAIL".into(), email));
+            git.env.push(("GIT_AUTHOR_DATE".into(), date));
+        }
+        let input = match message {
+            Some(m) => format!("{m}\n").into_bytes(),
+            None => body.to_vec(),
+        };
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        let out = git.run_ok(Some(&self.root), &argv, Some(&input))?.text();
+        Ok(crate::check_oid(out.trim())?.to_string())
     }
 
     // ---- branches ----
@@ -463,8 +573,48 @@ impl Repo {
 
 #[cfg(test)]
 mod tests {
+    use super::parse_ident;
     use crate::testing::{commit_all, repo, sample, write};
     use crate::{Change, LogQuery, RefKind, RepoState, patch::Target};
+
+    #[test]
+    fn reword_head_and_older_commits() {
+        let (_d, r) = repo("ops-reword").unwrap();
+        write(&r, "a.txt", "one\n").unwrap();
+        let first = commit_all(&r, "First").unwrap();
+        write(&r, "a.txt", "two\n").unwrap();
+        commit_all(&r, "Second").unwrap();
+        write(&r, "a.txt", "three\n").unwrap();
+        let third = commit_all(&r, "Third").unwrap();
+        // An uncommitted change and a staged one survive.
+        write(&r, "a.txt", "four\n").unwrap();
+        write(&r, "b.txt", "new\n").unwrap();
+        r.stage(&["b.txt".into()]).unwrap();
+        let before = r.status().unwrap();
+
+        let w = r.reword(&third, "Third, renamed\n\nWith a body\n").unwrap();
+        assert_eq!(w.before, third);
+        assert_eq!(w.after, w.commit);
+        let c = r.find_commit(&w.after).unwrap();
+        assert_eq!((c.summary.as_str(), c.body.as_str()), ("Third, renamed", "With a body"));
+
+        let w2 = r.reword(&first, "First, renamed").unwrap();
+        let log = r.log(&LogQuery::default()).unwrap();
+        let summaries: Vec<&str> = log.iter().map(|c| c.summary.as_str()).collect();
+        assert_eq!(summaries, ["Third, renamed", "Second", "First, renamed"]);
+        assert_eq!(log[2].oid, w2.commit);
+        assert_eq!(log[0].author.time, c.author.time);
+        assert_eq!(r.text(&["rev-parse", "HEAD^{tree}"]).unwrap(), r.text(&["rev-parse", &format!("{third}^{{tree}}")]).unwrap());
+        assert_eq!(r.status().unwrap().files, before.files);
+
+        assert!(r.reword(&first, "  ").is_err());
+        assert!(r.reword("-x", "m").is_err());
+        assert!(r.reword("deadbeef", "m").is_err());
+        assert_eq!(parse_ident("Ada <a@b> 1 +0000"), Some(("Ada".into(), "a@b".into(), "1 +0000".into())));
+        for junk in ["", "<", ">", "a>b<", "é<é>é"] {
+            let _ = parse_ident(junk);
+        }
+    }
 
     #[test]
     fn stage_commit_and_history() {

@@ -21,7 +21,7 @@ pub mod testing;
 pub use blame::{Blame, BlameCommit, BlameLine};
 pub use diff::{DiffLine, FileDiff, Hunk, LineKind};
 pub use log::{Commit, LogQuery, Signature};
-pub use ops::{Outcome, PullMode, ResetMode};
+pub use ops::{Outcome, PullMode, ResetMode, Reworded};
 pub use refs::{Ref, RefKind};
 pub use remote::Remote;
 pub use runner::{Git, Output, Repo};
