@@ -1,0 +1,17 @@
+[package]
+name = "gitcraft-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GitCraft engine: the session over a repository, selection, undo, the command registry (every action is a command), the Git client feature catalog"
+
+[lints]
+workspace = true
+
+[dependencies]
+gitcraft-git = { workspace = true }
+gitcraft-graph = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

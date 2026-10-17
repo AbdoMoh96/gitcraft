@@ -1,0 +1,12 @@
+[package]
+name = "gitcraft-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GitCraft commit graph: lane assignment and the line segments each row draws"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }

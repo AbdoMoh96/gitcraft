@@ -1,0 +1,22 @@
+[package]
+name = "gitcraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "GitCraft command line: status, graph, run commands, parity, MCP server"
+
+[[bin]]
+name = "gitcraft-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gitcraft-engine = { workspace = true }
+gitcraft-mcp = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+gitcraft-git = { workspace = true }
