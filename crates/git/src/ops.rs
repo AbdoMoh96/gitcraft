@@ -741,17 +741,27 @@ mod tests {
 
     #[test]
     fn paths_are_literal() {
-        // `:x` and `*` would be pathspec magic and a glob; they must name exactly these files.
+        // `[ab].txt` would be a glob matching `a.txt`: it must name exactly that file.
         let (_d, r) = repo("ops-literal").unwrap();
-        write(&r, ":x", "1\n").unwrap();
-        write(&r, "*", "2\n").unwrap();
+        write(&r, "[ab].txt", "1\n").unwrap();
+        write(&r, "a.txt", "2\n").unwrap();
         write(&r, "other.txt", "3\n").unwrap();
-        r.stage(&[":x".into()]).unwrap();
-        r.stage(&["*".into()]).unwrap();
+        r.stage(&["[ab].txt".into()]).unwrap();
         let st = r.status().unwrap();
-        assert_eq!(st.staged().count(), 2);
-        assert!(st.file("other.txt").unwrap().is_untracked());
-        assert_eq!(r.diff_staged(":x", 3).unwrap().added(), 1);
+        assert_eq!(st.staged().count(), 1);
+        assert!(st.file("a.txt").unwrap().is_untracked());
+        assert_eq!(r.diff_staged("[ab].txt", 3).unwrap().added(), 1);
+        // `:x` (pathspec magic) and `*` (a glob for everything) can't be file names on Windows.
+        if !cfg!(windows) {
+            write(&r, ":x", "1\n").unwrap();
+            write(&r, "*", "2\n").unwrap();
+            r.stage(&[":x".into()]).unwrap();
+            r.stage(&["*".into()]).unwrap();
+            let st = r.status().unwrap();
+            assert_eq!(st.staged().count(), 3);
+            assert!(st.file("other.txt").unwrap().is_untracked());
+            assert_eq!(r.diff_staged(":x", 3).unwrap().added(), 1);
+        }
     }
 
     #[test]
