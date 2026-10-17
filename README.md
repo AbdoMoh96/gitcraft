@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="GitCraft icon" src="assets/gitcraft.png" width="128" height="128">
+</p>
+
 <h1 align="center">GitCraft</h1>
 
 <p align="center">

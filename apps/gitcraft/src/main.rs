@@ -84,28 +84,9 @@ fn save_prefs(p: &Prefs) {
     }
 }
 
-/// The window icon: the app mark (three commits on two lanes on a violet disc), drawn here.
+/// The window icon: the GitCraft cat (`assets/gitcraft.png`), embedded at build time.
 fn app_icon() -> egui::IconData {
-    let n = 64usize;
-    let mut rgba = vec![0u8; n * n * 4];
-    let c = n as f32 / 2.0;
-    let dots = [(c - 7.0, c - 10.0), (c - 7.0, c + 10.0), (c + 8.0, c - 1.0)];
-    for y in 0..n {
-        for x in 0..n {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let d = ((fx - c).powi(2) + (fy - c).powi(2)).sqrt();
-            let mut px = if d <= c - 1.0 { [0x70, 0x48, 0xE8, 255] } else { [0, 0, 0, 0] };
-            let on_line = (fx - (c - 7.0)).abs() < 1.8 && fy > c - 10.0 && fy < c + 10.0;
-            let on_dot = dots.iter().any(|(dx, dy)| ((fx - dx).powi(2) + (fy - dy).powi(2)).sqrt() < 4.0);
-            if d <= c - 1.0 && (on_line || on_dot) {
-                px = [255, 255, 255, 255];
-            }
-            if let Some(slot) = rgba.get_mut((y * n + x) * 4..(y * n + x) * 4 + 4) {
-                slot.copy_from_slice(&px);
-            }
-        }
-    }
-    egui::IconData { rgba, width: n as u32, height: n as u32 }
+    eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/gitcraft.png")).unwrap_or_default()
 }
 
 fn main() -> std::process::ExitCode {
