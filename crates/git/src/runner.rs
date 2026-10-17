@@ -43,6 +43,19 @@ impl Default for Git {
     }
 }
 
+/// On Windows a GUI app has no console, so each console program it starts (git) gets a new
+/// console window: it flashes, steals focus from the app (lost clicks) and costs time per run.
+/// `CREATE_NO_WINDOW` runs git without one; its output still comes through the pipes.
+#[cfg(windows)]
+fn no_console_window(c: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    c.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn no_console_window(_: &mut Command) {}
+
 /// Longest output we keep from one git run (a huge diff or log is cut, never allocated whole).
 const MAX_OUTPUT: u64 = 256 * 1024 * 1024;
 
@@ -85,6 +98,7 @@ impl Git {
             c.env(k, v);
         }
         c.args(["-c", "color.ui=false", "-c", "core.quotepath=false", "-c", "log.showSignature=false"]);
+        no_console_window(&mut c);
         c
     }
 
