@@ -159,3 +159,51 @@ fn drag_a_branch_onto_another() {
     a.run("branch.dropOnto", json!({"from": m.from, "onto": m.onto, "action": "merge"})).unwrap();
     assert!(a.session.repo().unwrap().is_ancestor("feature", "main"));
 }
+
+/// Hovering a pill that stands for several branches lists them all; a click checks one out.
+#[test]
+fn hover_lists_every_branch_on_a_commit() {
+    let (_d, mut a) = app("ui-labels");
+    a.run("branch.create", json!({"name": "topic", "checkout": true})).unwrap();
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let frame = |a: &mut GitApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+    };
+    frame(&mut a, vec![]);
+    frame(&mut a, vec![]);
+    let i = a.session.data.refs.iter().position(|r| r.name == "topic" && r.kind == gitcraft_git::RefKind::Local).unwrap();
+    let pill = ctx.read_response(egui::Id::new(("pill", "topic".to_string(), i))).unwrap().rect;
+    frame(&mut a, vec![egui::Event::PointerMoved(pill.center())]);
+    frame(&mut a, vec![egui::Event::PointerMoved(pill.center())]);
+    assert!(a.label_popup.is_some(), "hovering opens the list");
+    let list = ctx.memory(|m| m.area_rect(egui::Id::new("label_popup"))).unwrap();
+    // Down through the gap into the list: it stays open.
+    frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(pill.center().x, list.top() + 2.0))]);
+    assert!(a.label_popup.is_some());
+    // Rows: topic (checked out, first), main, then the tag v0.1.0: click main.
+    let main = egui::pos2(list.left() + 60.0, list.bottom() - 18.0 - 24.0);
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut a, vec![egui::Event::PointerMoved(main)]);
+    frame(&mut a, vec![button(main, true)]);
+    frame(&mut a, vec![button(main, false)]);
+    let notes: Vec<_> = a.toasts.notes.iter().map(|n| n.text.clone()).collect();
+    assert_eq!(a.session.data.status.branch.as_deref(), Some("main"), "{notes:?} {list:?} {pill:?}");
+    assert!(a.label_popup.is_none());
+    assert!(a.toasts.notes.iter().any(|n| n.text.contains("main")));
+    // Moving away closes it.
+    frame(&mut a, vec![egui::Event::PointerMoved(pill.center())]);
+    frame(&mut a, vec![egui::Event::PointerMoved(pill.center())]);
+    assert!(a.label_popup.is_some());
+    frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(1000.0, 800.0))]);
+    assert!(a.label_popup.is_none());
+}

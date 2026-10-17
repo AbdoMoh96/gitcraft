@@ -82,6 +82,7 @@ pub fn entries(app: &GitApp, query: &str) -> Vec<Entry> {
         ("ui.shortcuts", "Keyboard Shortcuts", "Help"),
         ("ui.theme", "Switch Light/Dark Theme", "View"),
         ("ui.revealRepo", "Show in File Manager", "Repository"),
+        ("ui.terminal", "Open Terminal", "Repository"),
     ] {
         if let Some(sc) = score(query, label) {
             v.push((sc, Entry { label: label.into(), detail: loc.into(), target: Target::Command(id), disabled: None }));

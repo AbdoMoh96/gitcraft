@@ -36,6 +36,7 @@ pub enum Icon {
     Chevron,
     ChevronDown,
     Pencil,
+    Terminal,
 }
 
 struct Pen<'a> {
@@ -156,6 +157,12 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32, a: Color32) {
             pen.line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
         Icon::Minus => pen.line(&[(4.0, 10.0), (16.0, 10.0)]),
+        Icon::Terminal => {
+            // A window with a prompt and a cursor.
+            pen.closed(&[(2.5, 4.0), (17.5, 4.0), (17.5, 16.0), (2.5, 16.0)]);
+            pen.line(&[(5.5, 8.0), (8.5, 10.5), (5.5, 13.0)]);
+            pen.line_c(&[(10.0, 13.0), (14.5, 13.0)], pen.a);
+        }
         Icon::Pencil => {
             // A pencil lying from bottom left to top right, its tip in the accent colour.
             pen.closed(&[(5.5, 12.0), (13.5, 4.0), (16.0, 6.5), (8.0, 14.5)]);

@@ -22,6 +22,11 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
   another branch's row and pick Fast-forward (when possible), Merge or Rebase from the menu; the
   branch being changed is checked out first; fast-forwarding a branch that isn't checked out is
   undoable.
+- **2026-10-17 — M1.** Hovering a graph label that stands for several refs (`topic +1`) lists them
+  all; a click checks one out. Results and errors slide in as notifications at the bottom left
+  (titled with the command, errors stay longer, hover keeps one, click closes). Terminal button on
+  the toolbar (`ui.terminal`): opens the desktop's terminal in the repository (custom command in
+  Preferences).
 - **2026-10-17 — M1.** Workspace in the WordCraft layout (control-key, git, graph, engine, mcp,
   ui-egui, apps, xtask). Clean-room inventory of the target (`docs/clean-room.md`). git layer with
   parsers for status v2, log, refs, diffs, blame, stashes, remotes and hunk/line patches; operations

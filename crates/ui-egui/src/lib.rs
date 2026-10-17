@@ -17,6 +17,7 @@ pub mod palette;
 pub mod refs_panel;
 pub mod start;
 pub mod theme;
+pub mod toasts;
 pub mod toolbar;
 pub mod util;
 
@@ -52,11 +53,21 @@ pub struct Prefs {
     pub commit_limit: usize,
     /// Show authors' Gravatar pictures (their e-mail's hash is sent to gravatar.com).
     pub gravatar: bool,
+    /// The terminal to open (`kitty --directory {dir}`); empty: the system's.
+    pub terminal: String,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { appearance: Appearance::System, recent: Vec::new(), reopen_last: true, context_lines: 3, commit_limit: 2000, gravatar: true }
+        Prefs {
+            appearance: Appearance::System,
+            recent: Vec::new(),
+            reopen_last: true,
+            context_lines: 3,
+            commit_limit: 2000,
+            gravatar: true,
+            terminal: String::new(),
+        }
     }
 }
 
@@ -109,6 +120,8 @@ pub struct GitApp {
     pub palette: Option<palette::Palette>,
     pub jobs: Vec<Job>,
     pub toast: Option<Toast>,
+    /// Notifications sliding in at the bottom left.
+    pub toasts: toasts::Toasts,
     pub ref_filter: String,
     pub pick: LinePick,
     /// Scroll the graph to the selected row on the next frame.
@@ -131,6 +144,8 @@ pub struct GitApp {
     pub avatars: avatars::Avatars,
     /// The menu after dropping a branch on another one in the graph.
     pub drop_menu: Option<graph_view::DropMenu>,
+    /// The list of every label on a hovered graph pill.
+    pub label_popup: Option<graph_view::LabelPopup>,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -160,6 +175,7 @@ impl GitApp {
             palette: None,
             jobs: Vec::new(),
             toast: None,
+            toasts: toasts::Toasts::default(),
             ref_filter: String::new(),
             pick: LinePick::default(),
             scroll_to_selection: true,
@@ -174,6 +190,7 @@ impl GitApp {
             reword: None,
             avatars,
             drop_menu: None,
+            label_popup: None,
         }
     }
 
@@ -182,8 +199,16 @@ impl GitApp {
         self
     }
 
+    /// Report a result: in the status bar and as a notification.
     pub fn status(&mut self, text: impl Into<String>, error: bool) {
-        self.toast = Some(Toast { text: text.into(), error, at: util::now_s() });
+        self.notify(None, text, error);
+    }
+
+    /// [`GitApp::status`] with the notification titled (the command's name).
+    pub fn notify(&mut self, title: Option<&str>, text: impl Into<String>, error: bool) {
+        let text = text.into();
+        self.toasts.push(title, text.clone(), error);
+        self.toast = Some(Toast { text, error, at: util::now_s() });
     }
 
     /// Open the repository containing `path`; remembered in the recent list.
@@ -259,7 +284,8 @@ impl GitApp {
             Ok(v) => {
                 if let Some(m) = v.get("message").and_then(Value::as_str).filter(|m| !m.is_empty()) {
                     let conflicts = v.get("conflicts").and_then(Value::as_bool).unwrap_or(false);
-                    self.status(m.to_string(), conflicts);
+                    let title = self.session.registry.get(id).map(|s| s.label);
+                    self.notify(title, m.to_string(), conflicts);
                 }
                 let now = self.session.repo.as_ref().map(|r| r.root().to_path_buf());
                 if now.is_some() && now.as_deref() != had_repo {
@@ -275,7 +301,10 @@ impl GitApp {
                     self.pick.lines.clear();
                 }
             }
-            Err(e) => self.status(e.to_string(), true),
+            Err(e) => {
+                let title = self.session.registry.get(id).map(|s| format!("{} failed", s.label));
+                self.notify(title.as_deref(), e.to_string(), true);
+            }
         }
     }
 
@@ -292,7 +321,8 @@ impl GitApp {
         });
         match started {
             Ok(_) => {
-                self.status(format!("{label}…"), false);
+                // Progress shows in the status bar only; the result gets a notification.
+                self.toast = Some(Toast { text: format!("{label}…"), error: false, at: util::now_s() });
                 self.jobs.push(Job { id, label, started: util::now_s(), rx, reply });
             }
             Err(e) => self.status(format!("{label}: {e}"), true),
@@ -367,6 +397,16 @@ impl GitApp {
                 let p = self.prefs.recent.get(i).cloned().ok_or("no such recent repository")?;
                 self.open_repo(Path::new(&p))?;
                 Ok(json!({"path": p}))
+            }
+            "ui.terminal" => {
+                let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).ok_or("no repository is open")?;
+                // Unit tests run every UI command: they must not open windows.
+                let prog = if cfg!(test) {
+                    util::terminal_command(&root, &self.prefs.terminal).map(|c| c.0).unwrap_or_default()
+                } else {
+                    util::open_terminal(&root, &self.prefs.terminal)?
+                };
+                Ok(json!({"path": root.display().to_string(), "terminal": prog}))
             }
             "ui.revealRepo" => {
                 let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).ok_or("no repository is open")?;
@@ -588,10 +628,14 @@ impl GitApp {
         }
         dialogs::show(self, &ctx);
         palette::show(self, &ctx);
+        self.toasts.show(&ctx, 24.0);
     }
 
     /// Whether a command is enabled, and why not.
     pub fn disabled(&self, id: &str) -> Option<&'static str> {
+        if matches!(id, "ui.terminal" | "ui.revealRepo") {
+            return self.session.repo.is_none().then_some("no repository is open");
+        }
         match self.session.registry.get(id) {
             Some(s) => (s.enabled)(&self.session),
             None => Some("unknown command"),

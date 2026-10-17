@@ -364,6 +364,14 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 app.avatars.set_enabled(app.prefs.gravatar);
             }
             ui.add_space(6.0);
+            ui.label(RichText::new("TERMINAL").small().strong());
+            ui.add(
+                egui::TextEdit::singleline(&mut app.prefs.terminal)
+                    .hint_text("System default (e.g. kitty --directory {dir})")
+                    .desired_width(f32::INFINITY),
+            )
+            .on_hover_text("The command that opens a terminal; {dir} is the repository's folder");
+            ui.add_space(6.0);
             let git = app.session.git.version().unwrap_or_else(|e| e.to_string());
             ui.label(RichText::new(git).small().weak());
             let (ok, cancel) = buttons(ui, "Done", true, false);

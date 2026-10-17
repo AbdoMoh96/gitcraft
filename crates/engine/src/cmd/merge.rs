@@ -122,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("rebase.onto", "Rebase Current Branch onto", "Left Panel › Branches", rebase)
             .params(r#"{"ref": branch or commit}"#)
             .when(need_branch),
-        CommandSpec::new("branch.dropOnto", "Drag Branch onto Branch", "Graph", drop_onto)
+        CommandSpec::new("branch.dropOnto", "Merge or Rebase Branch", "Graph", drop_onto)
             .params(r#"{"from": branch, remote branch or tag, "onto": local branch, "action": "merge" | "rebase" | "fastForward"}"#)
             .when(need_commits),
         CommandSpec::new("op.continue", "Continue", "Commit Panel › Conflicts", |s, _| {

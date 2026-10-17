@@ -262,6 +262,84 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         a.apply(app);
     }
     drop_menu(app, ui.ctx());
+    label_popup(app, ui.ctx());
+}
+
+/// The list of every label on a commit, open while the pointer is on its pill or the list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LabelPopup {
+    pub oid: String,
+    pub pill: Rect,
+}
+
+/// Every branch and tag on the hovered pill's commit; a click checks one out.
+fn label_popup(app: &mut GitApp, ctx: &egui::Context) {
+    let Some(pop) = app.label_popup.clone() else { return };
+    let ls = labels(&app.session.data, &pop.oid);
+    if ls.len() < 2 || app.drop_menu.is_some() {
+        app.label_popup = None;
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let mut run: Option<(&'static str, serde_json::Value)> = None;
+    let area = egui::Area::new(egui::Id::new("label_popup"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(pop.pill.left_bottom() + vec2(0.0, 2.0))
+        .constrain(true)
+        .show(ctx, |ui| {
+            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                let w = 230.0;
+                ui.set_width(w);
+                ui.label(egui::RichText::new(format!("{} refs on this commit", ls.len())).small().weak());
+                for l in &ls {
+                    let (r, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
+                    let p = ui.painter();
+                    if resp.hovered() && !l.head {
+                        p.rect_filled(r, 4.0, t.hover);
+                    }
+                    let mut x = r.left() + 4.0;
+                    for (on, icon) in [(l.local, Icon::Laptop), (l.remote, Icon::Cloud), (l.tag, Icon::Tag)] {
+                        if on {
+                            icons::paint(p, Rect::from_center_size(pos2(x + 7.0, r.center().y), vec2(13.0, 13.0)), icon, t.dim, t.accent);
+                            x += 16.0;
+                        }
+                    }
+                    let font = FontId::proportional(12.5);
+                    let color = if l.head { t.accent } else { t.text };
+                    let right = if l.head { r.right() - 82.0 } else { r.right() - 4.0 };
+                    let clip = Rect::from_min_max(pos2(x + 4.0, r.top()), pos2(right, r.bottom()));
+                    let g = p.layout_no_wrap(l.text.clone(), font, color);
+                    p.with_clip_rect(clip).galley(pos2(clip.left(), r.center().y - g.size().y / 2.0), g, color);
+                    if l.head {
+                        p.text(r.right_center() - vec2(4.0, 0.0), Align2::RIGHT_CENTER, "checked out", FontId::proportional(11.0), t.dim);
+                    } else if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let resp = resp.on_hover_text(if l.tag && !l.local && !l.remote {
+                        format!("Check out {} (detached)", l.text)
+                    } else {
+                        format!("Check out {}", l.text)
+                    });
+                    if resp.clicked() && !l.head {
+                        run = Some(if l.local || l.remote {
+                            ("branch.checkout", json!({"name": l.text}))
+                        } else {
+                            ("commit.checkout", json!({"oid": pop.oid}))
+                        });
+                    }
+                }
+            });
+        });
+    // Open while the pointer is on the pill, the list, or the gap between them.
+    let list = area.response.rect;
+    let bridge = Rect::from_min_max(pos2(pop.pill.left().min(list.left()), pop.pill.top()), pos2(pop.pill.right().max(list.right()), list.top()));
+    let inside = ctx.pointer_hover_pos().is_some_and(|p| pop.pill.expand(3.0).contains(p) || list.expand(6.0).contains(p) || bridge.contains(p));
+    if let Some((id, params)) = run {
+        app.label_popup = None;
+        let _ = app.run(id, params);
+    } else if !inside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.label_popup = None;
+    }
 }
 
 /// A branch, remote branch or tag being dragged from a label.
@@ -357,6 +435,9 @@ fn drop_menu(app: &mut GitApp, ctx: &egui::Context) {
 /// Clicks, double-clicks, right-clicks and drags on a row's label.
 fn pill_events(app: &GitApp, r: &egui::Response, ls: &[Label], commit: &Commit, actions: &mut Vec<Action>) {
     let Some(first) = ls.first() else { return };
+    if ls.len() > 1 && r.hovered() && !r.dragged() && !egui::DragAndDrop::has_any_payload(&r.ctx) {
+        actions.push(Action::LabelPopup(LabelPopup { oid: commit.oid.clone(), pill: r.rect }));
+    }
     r.dnd_set_drag_payload(DragRef { name: first.text.clone() });
     if r.clicked() {
         actions.push(Action::Run("graph.select", json!({"oid": commit.oid})));
@@ -373,6 +454,7 @@ enum Action {
     Run(&'static str, serde_json::Value),
     Reword(Reword),
     DropMenu(String, String, Pos2),
+    LabelPopup(LabelPopup),
     Dialog(Dialog),
     Copy(String),
 }
@@ -384,6 +466,7 @@ impl Action {
                 let _ = app.run(id, p);
             }
             Action::Dialog(d) => app.dialog = Some(d),
+            Action::LabelPopup(p) => app.label_popup = Some(p),
             Action::DropMenu(from, onto, at) => {
                 app.drop_menu = Some(DropMenu::new(app, from, onto, at));
             }
@@ -569,11 +652,14 @@ fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) -> Option<egu
     }
     p.with_clip_rect(pill.shrink(2.0)).galley(pos2(x + 2.0, pill.center().y - g.size().y / 2.0), g, Color32::WHITE);
     let resp = ui.interact(pill, egui::Id::new(("pill", &first.text, first.target)), Sense::click_and_drag());
-    let tip = if ls.len() > 1 { ls.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n") } else { first.text.clone() };
     if resp.hovered() && !resp.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some(resp.on_hover_text(format!("{tip}\n\nDrag onto another branch to merge or rebase")))
+    // Several labels: hovering opens the list of all of them instead (see `label_popup`).
+    if ls.len() > 1 {
+        return Some(resp);
+    }
+    Some(resp.on_hover_text(format!("{}\n\nDrag onto another branch to merge or rebase", first.text)))
 }
 
 fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Action>) {

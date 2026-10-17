@@ -133,6 +133,96 @@ pub fn reveal(path: &Path) -> Result<(), String> {
     std::process::Command::new(prog).arg(path).spawn().map(|_| ()).map_err(|e| format!("{prog}: {e}"))
 }
 
+/// Whether `prog` is a program on the PATH.
+fn on_path(prog: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&paths).any(|d| {
+        let p = d.join(prog);
+        p.is_file() || (cfg!(windows) && p.with_extension("exe").is_file())
+    })
+}
+
+/// Linux terminals we know, with the flags that start them in a folder (`{dir}`).
+const TERMINALS: &[(&str, &[&str])] = &[
+    ("konsole", &["--workdir", "{dir}"]),
+    ("gnome-terminal", &["--working-directory={dir}"]),
+    ("kgx", &["--working-directory", "{dir}"]),
+    ("ptyxis", &["--new-window", "--working-directory", "{dir}"]),
+    ("xfce4-terminal", &["--working-directory", "{dir}"]),
+    ("mate-terminal", &["--working-directory", "{dir}"]),
+    ("tilix", &["--working-directory", "{dir}"]),
+    ("kitty", &["--directory", "{dir}"]),
+    ("alacritty", &["--working-directory", "{dir}"]),
+    ("wezterm", &["start", "--cwd", "{dir}"]),
+    ("ghostty", &["--working-directory={dir}"]),
+    ("foot", &["--working-directory", "{dir}"]),
+    ("terminator", &["--working-directory", "{dir}"]),
+    ("x-terminal-emulator", &[]),
+    ("xterm", &[]),
+];
+
+/// The command that opens a terminal in `dir`: `custom` (a command line where `{dir}` is the
+/// folder) when set, else the platform's terminal. `None` when no terminal is found.
+pub fn terminal_command(dir: &Path, custom: &str) -> Option<(String, Vec<String>)> {
+    let d = dir.to_string_lossy().into_owned();
+    let fill = |args: &[&str]| args.iter().map(|a| a.replace("{dir}", &d)).collect::<Vec<_>>();
+    let custom = custom.trim();
+    if !custom.is_empty() {
+        let mut parts = custom.split_whitespace();
+        let prog = parts.next()?.to_string();
+        let rest: Vec<&str> = parts.collect();
+        if cfg!(target_os = "macos") && rest.is_empty() && !prog.contains('/') {
+            // An application's name: `open -a iTerm <dir>`.
+            return Some(("open".into(), vec!["-a".into(), prog, d]));
+        }
+        return Some((prog, fill(&rest)));
+    }
+    if cfg!(target_os = "macos") {
+        return Some(("open".into(), vec!["-a".into(), "Terminal".into(), d]));
+    }
+    if cfg!(windows) {
+        if on_path("wt") {
+            return Some(("wt".into(), vec!["-d".into(), d]));
+        }
+        return Some(("cmd".into(), vec!["/C".into(), "start".into(), String::new(), "cmd.exe".into()]));
+    }
+    // $TERMINAL first, then the desktop's own, then any we know.
+    if let Ok(t) = std::env::var("TERMINAL")
+        && let Some(prog) = t.split_whitespace().next()
+        && on_path(prog)
+    {
+        let known = TERMINALS.iter().find(|(n, _)| *n == prog).map(|(_, a)| fill(a)).unwrap_or_default();
+        return Some((prog.to_string(), known));
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
+    let first = if desktop.contains("kde") {
+        "konsole"
+    } else if desktop.contains("gnome") {
+        "gnome-terminal"
+    } else if desktop.contains("xfce") {
+        "xfce4-terminal"
+    } else {
+        ""
+    };
+    TERMINALS.iter().filter(|(n, _)| *n == first).chain(TERMINALS.iter()).find(|(n, _)| on_path(n)).map(|(n, a)| (n.to_string(), fill(a)))
+}
+
+/// Open a terminal in `dir` (see [`terminal_command`]); the program's name.
+pub fn open_terminal(dir: &Path, custom: &str) -> Result<String, String> {
+    let (prog, args) = terminal_command(dir, custom).ok_or("no terminal found: set one in Preferences")?;
+    let mut child = std::process::Command::new(&prog)
+        .args(&args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("{prog}: {e}"))?;
+    // Reap it when it exits so it never lingers as a zombie.
+    let _ = std::thread::Builder::new().name("gitcraft terminal".into()).spawn(move || child.wait());
+    Ok(prog)
+}
+
 /// A stable colour for a person (their avatar circle).
 pub fn person_color(name: &str) -> egui::Color32 {
     let h = name.bytes().fold(2_166_136_261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16_777_619));
@@ -176,6 +266,14 @@ mod tests {
         assert_eq!(base64(b"fo"), "Zm8=");
         assert_eq!(base64(b"foo"), "Zm9v");
         assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn terminal_commands() {
+        let dir = Path::new("/r/my repo");
+        let (p, a) = terminal_command(dir, "kitty --directory {dir}").unwrap();
+        assert_eq!((p.as_str(), a), ("kitty", vec!["--directory".to_string(), "/r/my repo".to_string()]));
+        assert!(terminal_command(dir, "   ").is_none_or(|(p, _)| !p.is_empty()));
     }
 
     #[test]

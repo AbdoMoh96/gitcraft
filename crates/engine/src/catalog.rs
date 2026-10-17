@@ -140,7 +140,7 @@ Integrations|Hosting|Launchpad|launchpad.open
 /// Commands implemented by the UI (`ui.*`), not the engine. `gitcraft-ui-egui` checks that it
 /// handles each of these.
 pub const UI_COMMANDS: &[&str] =
-    &["ui.revealRepo", "ui.recent", "ui.copySha", "ui.filterRefs", "ui.commandPalette", "ui.shortcuts", "ui.theme", "ui.preferences"];
+    &["ui.revealRepo", "ui.terminal", "ui.recent", "ui.copySha", "ui.filterRefs", "ui.commandPalette", "ui.shortcuts", "ui.theme", "ui.preferences"];
 
 pub struct Entry {
     pub area: &'static str,
