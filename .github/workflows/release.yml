@@ -1,12 +1,14 @@
 name: Release
 
-# Push a tag `v<version>` (matching `version` in Cargo.toml) to build GitCraft for Linux, macOS and
-# Windows and publish a GitHub Release with the packages. Running the workflow by hand
-# (Actions › Release › Run workflow) builds the packages as artifacts without publishing.
+# Every push to `main` checks the version in Cargo.toml: when release `v<version>` doesn't exist
+# yet, GitCraft is built for Linux, macOS and Windows and published as that release (the tag is
+# created on the pushed commit). When it exists, nothing is built: bump the version to release.
+# Running the workflow by hand (Actions › Release › Run workflow) builds the packages as artifacts
+# without publishing.
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,28 +27,46 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
       - name: Version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "gitcraft") | .version')
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match the version in Cargo.toml ($version): expected v$version"
-            exit 1
+          # Publish only from a push to main, and only a version not released yet.
+          publish=false
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::notice::v$version is already released; bump the version in Cargo.toml to publish a new release"
+            else
+              publish=true
+            fi
           fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          # Build when publishing, or when started by hand (artifacts only).
+          build=$([[ "$publish" == true || "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && echo true || echo false)
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          echo "version $version, publish $publish, build $build"
+      - name: Linux build dependencies
+        if: steps.version.outputs.build == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
       - run: git config --global user.name CI && git config --global user.email ci@example.com
+        if: steps.version.outputs.build == 'true'
       - run: cargo xtask ci
+        if: steps.version.outputs.build == 'true'
 
   build:
     name: Build ${{ matrix.name }}
     needs: check
+    if: needs.check.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +106,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [check, build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -107,8 +127,9 @@ jobs:
           # A version with a suffix (1.0.0-beta.1) is published as a pre-release.
           pre=()
           [[ "$VERSION" == *-* ]] && pre=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --verify-tag \
+          # Creates tag v<version> on the pushed commit.
+          gh release create "v$VERSION" dist/* \
+            --target "$GITHUB_SHA" \
             --title "GitCraft $VERSION" \
             --generate-notes \
             "${pre[@]}"

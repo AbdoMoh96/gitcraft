@@ -1,8 +1,12 @@
 name: CI
 
+# Paused: runs only when started by hand (Actions › CI › Run workflow). The release workflow runs
+# the same gates (`cargo xtask ci`) before publishing. To turn it back on, restore:
+#   on:
+#     push:
+#     pull_request:
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   ci:

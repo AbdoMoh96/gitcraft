@@ -117,5 +117,5 @@ other Git client; see [`NOTICE`](NOTICE).
 
 ## Releases
 
-Pre-built packages for Linux, macOS and Windows are on the GitHub Releases page. Pushing a tag
-`v<version>` builds and publishes them: see [docs/releasing.md](docs/releasing.md).
+Pre-built packages for Linux, macOS and Windows are on the GitHub Releases page. Pushing to `main`
+with a new version in `Cargo.toml` builds and publishes them: see [docs/releasing.md](docs/releasing.md).

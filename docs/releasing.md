@@ -4,22 +4,22 @@ Releases are built and published by `.github/workflows/release.yml` when a versi
 
 ## Steps
 
+Every push to `main` runs the workflow. It reads the version from `Cargo.toml` and publishes
+release `v<version>` only when that release doesn't exist yet; otherwise it stops after a quick
+check (nothing is built).
+
 1. Set the new version in `Cargo.toml` (`[workspace.package] version = "0.2.0"`) and run
    `cargo xtask ci` (it also refreshes `Cargo.lock`).
-2. Commit: `git commit -am "Release 0.2.0"` and push.
-3. Tag and push the tag — the tag must be `v` + the version in `Cargo.toml`:
-
-   ```bash
-   git tag -a v0.2.0 -m "GitCraft 0.2.0"
-   git push origin v0.2.0
-   ```
-
-4. The workflow checks the tag against `Cargo.toml`, runs `cargo xtask ci`, builds every platform,
-   and creates the GitHub Release with generated notes. A version with a suffix (`0.2.0-beta.1`)
+2. Commit and push to `main`.
+3. The workflow runs `cargo xtask ci`, builds every platform, creates tag `v0.2.0` on that commit
+   and publishes the GitHub Release with generated notes. A version with a suffix (`0.2.0-beta.1`)
    is published as a pre-release.
 
 To try the builds without publishing, run the workflow by hand (Actions › Release › Run workflow):
 the packages are attached to the run as artifacts.
+
+The CI workflow (`ci.yml`) is paused: it runs only when started by hand (Actions › CI › Run
+workflow). Its `on:` block says how to turn it back on.
 
 ## What is published
 
