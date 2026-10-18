@@ -79,10 +79,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 if tool(app, ui, Icon::Pull, "Pull", "remote.pull") {
                     let _ = app.run("remote.pull", json!({}));
                 }
-                pull_menu(app, ui);
                 if tool(app, ui, Icon::Push, "Push", "remote.push") {
                     let _ = app.run("remote.push", json!({}));
                 }
+                actions_menu(app, ui);
                 separator(ui);
                 if tool(app, ui, Icon::Branch, "Branch", "branch.create") {
                     app.dialog = Dialog::named("branch.create", &app.session, &json!({}));
@@ -197,8 +197,9 @@ fn branch_menu(app: &mut GitApp, ui: &mut egui::Ui) {
     });
 }
 
-fn pull_menu(app: &mut GitApp, ui: &mut egui::Ui) {
-    menu(ui, None, RichText::new(""), |ui| {
+/// The Actions menu after Push: every fetch, pull and push variant.
+fn actions_menu(app: &mut GitApp, ui: &mut egui::Ui) {
+    menu(ui, None, RichText::new("Actions"), |ui| {
         for id in ["remote.fetch", "remote.pull", "remote.pullFastForward", "remote.pullRebase", "remote.push", "remote.forcePush"] {
             let label = app.session.registry.get(id).map(|s| s.label).unwrap_or(id);
             let why = app.disabled(id);

@@ -215,7 +215,13 @@ fn conflicts_resolve_and_continue() {
     assert_eq!(v["ours"], json!("main side\n"));
     assert_eq!(v["theirs"], json!("feature side\n"));
     assert!(s.run("conflict.versions", &json!({"path": "../x"})).is_err());
-    run(&mut s, "conflict.takeTheirs", json!({"path": "README.md"}));
+    assert_eq!(v["mergeable"], json!(true));
+    assert!(v["chunks"].as_array().unwrap().iter().any(|c| c["kind"] == "conflict" && c["theirs"] == json!(["feature side\n"])));
+    // The merge tool's output: only for files in conflict.
+    assert!(s.run("conflict.edit", &json!({"path": "src/main.rs", "content": "x"})).is_err());
+    run(&mut s, "conflict.edit", json!({"path": "README.md", "content": "main side\nfeature side\n"}));
+    assert_eq!(std::fs::read_to_string(repo.root().join("README.md")).unwrap(), "main side\nfeature side\n");
+    assert!(s.data.status.conflicted().next().is_none());
     // The commit panel finishes the merge with git's prepared message.
     let r = run(&mut s, "commit.create", json!({}));
     let merge = s.data.commit(r["oid"].as_str().unwrap()).unwrap();

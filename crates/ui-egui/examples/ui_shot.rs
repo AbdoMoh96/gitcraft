@@ -5,6 +5,7 @@
 //! Lays out GitCraft over a sample repository (with a feature branch, a merge, a tag, a stash and
 //! work in progress), runs the commands in order (`ui.*` ones too, e.g.
 //! `--cmd 'ui.dialog={"name":"branch.create"}'`), renders with wgpu and writes the PNG.
+//! `--conflict` stops in a merge with a conflict in `src/main.rs` instead of the work in progress.
 
 use gitcraft_engine::Session;
 use gitcraft_git::testing::{commit_all, sample, write};
@@ -44,14 +45,29 @@ fn main() -> Result<(), String> {
     repo.create_branch("fix/typo", None, true).map_err(|e| e.to_string())?;
     write(&repo, "README.md", "# Sample\n\nA repository for GitCraft, the Git client.\n").map_err(|e| e.to_string())?;
     step(commit_all(&repo, "Fix a typo in the readme"))?;
+    if args.iter().any(|a| a == "--conflict") {
+        write(
+            &repo,
+            "src/main.rs",
+            "fn main() {\n    let who = \"typo fixers\";\n    let greeting = \"hi\";\n    println!(\"{greeting}, {who}\");\n}\n",
+        )
+        .map_err(|e| e.to_string())?;
+        step(commit_all(&repo, "Greet the typo fixers"))?;
+    }
     repo.checkout_branch("main").map_err(|e| e.to_string())?;
     write(&repo, "src/main.rs", "fn main() {\n    let who = \"world\";\n    println!(\"hello, {who}\");\n}\n").map_err(|e| e.to_string())?;
     step(commit_all(&repo, "Name who we greet"))?;
-    write(&repo, "notes.txt", "stashed idea\n").map_err(|e| e.to_string())?;
-    repo.stash_save(Some("an idea for later"), true).map_err(|e| e.to_string())?;
-    write(&repo, "src/main.rs", "fn main() {\n    let who = \"GitCraft\";\n    println!(\"hello, {who}!\");\n}\n").map_err(|e| e.to_string())?;
-    write(&repo, "CHANGELOG.md", "# Changelog\n\n- First release\n").map_err(|e| e.to_string())?;
-    repo.stage(&["CHANGELOG.md".into()]).map_err(|e| e.to_string())?;
+    let conflict = args.iter().any(|a| a == "--conflict");
+    if conflict {
+        repo.merge("fix/typo", false, false).map_err(|e| e.to_string())?;
+    }
+    if !conflict {
+        write(&repo, "notes.txt", "stashed idea\n").map_err(|e| e.to_string())?;
+        repo.stash_save(Some("an idea for later"), true).map_err(|e| e.to_string())?;
+        write(&repo, "src/main.rs", "fn main() {\n    let who = \"GitCraft\";\n    println!(\"hello, {who}!\");\n}\n").map_err(|e| e.to_string())?;
+        write(&repo, "CHANGELOG.md", "# Changelog\n\n- First release\n").map_err(|e| e.to_string())?;
+        repo.stage(&["CHANGELOG.md".into()]).map_err(|e| e.to_string())?;
+    }
 
     let mut session = Session::new(repo.git().clone());
     session.set_repo(repo).map_err(|e| e.to_string())?;

@@ -115,6 +115,7 @@ fn main() -> std::process::ExitCode {
 
     let mut prefs = load_prefs();
     let mut keep_sample = None;
+    let mut restore_tabs = false;
     let mut session = Session::default();
     if sample {
         match gitcraft_git::testing::sample("app") {
@@ -131,6 +132,8 @@ fn main() -> std::process::ExitCode {
         if let Err(e) = session.open(f) {
             eprintln!("gitcraft: {e}");
         }
+    } else if prefs.reopen_last && !prefs.tabs.is_empty() {
+        restore_tabs = true;
     } else if prefs.reopen_last
         && let Some(last) = prefs.recent.first().cloned()
         && Path::new(&last).is_dir()
@@ -164,6 +167,11 @@ fn main() -> std::process::ExitCode {
                 avatar_cache: gitcraft_control_key::settings_dir().map(|d| d.join("avatars")),
             };
             let mut app = GitApp::new(session, prefs, services);
+            // The last run's tabs (the first one is open already).
+            if restore_tabs {
+                let (tabs, active) = (app.prefs.tabs.clone(), app.prefs.active_tab);
+                app.restore_tabs(&tabs, active);
+            }
             let mut key_file = None;
             if let Some(port) = port {
                 let settings = gitcraft_control_key::settings_dir();

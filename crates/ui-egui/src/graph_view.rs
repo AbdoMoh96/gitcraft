@@ -3,7 +3,7 @@
 //! ones are laid out, so long histories scroll smoothly.
 
 use egui::epaint::CubicBezierShape;
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use gitcraft_engine::git::{Commit, RefKind};
 use gitcraft_engine::graph::Seg;
 use gitcraft_engine::{RepoData, Selected};
@@ -136,6 +136,9 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     let search = app.session.view.search.to_lowercase();
     let mut actions: Vec<Action> = Vec::new();
     let dragging = egui::DragAndDrop::payload::<DragRef>(ui.ctx());
+    // Rows touch: any vertical spacing would break every lane line into dashes.
+    let spacing = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 0.0;
     let out = area.show_rows(ui, ROW_H, n, |ui, range| {
         let now = util::now_s();
         let d = &app.session.data;
@@ -169,7 +172,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             // Lanes.
             if let Some(row) = d.graph.rows.get(ci) {
                 let gp = p.with_clip_rect(cols.graph);
-                // The dashed line from the WIP row down to HEAD.
+                // The line from the WIP row down to HEAD.
                 if wip && let Some(h) = head_row {
                     let x = lane_x(cols.graph, head_lane);
                     let (y0, y1) = if ci < h {
@@ -180,7 +183,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                         (0.0, 0.0)
                     };
                     if y1 > y0 {
-                        gp.extend(Shape::dashed_line(&[pos2(x, y0), pos2(x, y1)], Stroke::new(1.5, t.dim), 3.0, 3.0));
+                        gp.line_segment([pos2(x, y0), pos2(x, y1)], Stroke::new(1.5, t.dim));
                     }
                 }
                 lanes(&gp, cols.graph, rect, &row.up, &row.down, &fade);
@@ -253,6 +256,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             resp.context_menu(|ui| commit_menu(app, ui, commit, &mut actions));
         }
     });
+    ui.spacing_mut().item_spacing.y = spacing;
     ui.ctx().data_mut(|m| m.insert_temp(offset_key, out.state.offset.y));
     if let Some(dr) = &dragging {
         drag_ghost(ui.ctx(), &dr.name);
@@ -522,7 +526,7 @@ fn wip_row(
     let x = lane_x(cols.graph, head_lane);
     let c = pos2(x, rect.center().y);
     if has_head {
-        p.with_clip_rect(cols.graph).extend(Shape::dashed_line(&[c, pos2(x, rect.bottom())], Stroke::new(1.5, t.dim), 3.0, 3.0));
+        p.with_clip_rect(cols.graph).line_segment([c + vec2(0.0, 7.0), pos2(x, rect.bottom())], Stroke::new(1.5, t.dim));
     }
     // A dashed ring.
     let n = 16;

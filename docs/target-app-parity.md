@@ -2,21 +2,22 @@
 
 Status: M1 · Revision 1 (2026-10-17)
 
-Measured: **86 of 123** catalogued features (69.9%), see `docs/parity-checklist.md`.
+Measured: **91 of 124** catalogued features (73.4%), see `docs/parity-checklist.md`.
 
 ## Strong
 - The daily loop: graph → select WIP → stage (file, hunk, lines) → commit → push, all with shortcuts.
 - Branch work from the left panel and the graph: checkout, create anywhere, merge, rebase, fast-forward,
   rename, delete (local and remote), upstreams.
 - Commit operations: cherry-pick, revert, reset (three modes), detached checkout, tags.
-- Conflicts: detection, banner, take ours / theirs, mark resolved, continue / skip / abort.
+- Conflicts: detection, banner, take ours / theirs, mark resolved, continue / skip / abort, and a
+  side-by-side merge tool picking hunks or single lines into an editable output.
+- Repository tabs, reopened at start.
 - Undo / redo for the operations people most want back.
 - Automation: every action is a command, reachable from CLI, control channel and MCP.
 
 ## Missing (ranked in `docs/gaps.md`)
 - Interactive rebase (reorder, squash, drop). Editing any commit message on the current branch works.
-- A three-way merge output editor (today: take a side or edit the file elsewhere, then mark resolved).
-- Repository tabs and workspaces; profiles and author identity editing.
+- Workspaces; profiles and author identity editing.
 - Submodules, worktrees, Git LFS, Git Flow, hooks list, patches.
 - Hosting integrations (pull requests, issues, CI status), cloud features.
 - Diff niceties: syntax highlighting, word-level highlights, ignore whitespace, in-app editing.

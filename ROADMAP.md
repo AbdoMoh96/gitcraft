@@ -4,15 +4,27 @@
 
 | Number | Value |
 |---|---|
-| Feature parity | 86 / 123 (69.9%) |
-| Commands | 79 engine + 12 UI |
-| Tests | 58 (`cargo xtask stats`) |
-| Lines of Rust | ~10,700 |
+| Feature parity | 91 / 124 (73.4%) |
+| Commands | 80 engine + 13 UI |
+| Tests | 76 (`cargo xtask stats`) |
+| Lines of Rust | ~13,900 |
 
 Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked work:
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-18 — M2.** Merge tool (`conflict.edit`): clicking a conflicted file opens the current
+  (ours) and incoming (theirs) sides side by side, aligned conflict by conflict; a box per conflict
+  takes that side's whole hunk and a box per line takes single lines, which go to the output below
+  in the order picked (All Current / All Incoming / Reset; Edit for hand changes). Save writes the
+  output and marks the file resolved. The view is merged again from the index stages
+  (`git merge-file --object-id`), falling back to the work tree's markers.
+- **2026-10-18 — M3.** Repository tabs (`ui.tabs`): opening, cloning or creating a repository
+  while one is shown opens a tab (an open one is shown instead); each tab keeps its own session,
+  undo, selection and line picks; background jobs finish in their own tab. `+` / Mod+T, Ctrl+Tab,
+  Ctrl+Shift+Tab, middle-click or Mod+W closes. Tabs are reopened at the next start.
+- **2026-10-18 — M1.** Toolbar: the fetch / pull / push menu is named Actions and sits after Push.
+  Graph lanes are continuous lines (rows no longer have a gap between them), WIP line included.
 - **2026-10-17 — M1.** Edit commit message (`commit.reword`, undoable): click a commit's message in
   the commit panel (or Graph › Edit Commit Message) to edit it; older commits are re-created with
   `commit-tree`, keeping trees, authors and dates, without touching the index or work tree.

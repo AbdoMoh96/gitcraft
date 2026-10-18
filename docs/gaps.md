@@ -7,9 +7,9 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
 1. **Interactive rebase** — `rebase.interactive`, `commit.squash`, `commit.drop` (`commit.reword` landed: it
    re-creates commits with `commit-tree`, no rebase needed): a
    todo list editor driven by `GIT_SEQUENCE_EDITOR` writing a prepared todo file.
-2. **Merge tool output editor** — `conflict.edit`: three panes (ours, theirs, output) from
-   `conflict.versions`, chunk pickers, save + mark resolved.
-3. **Repository tabs** — `ui.tabs`: several `Session`s in one window.
+2. ~~Merge tool output editor~~ — landed (`conflict.edit`). Next: syntax colours in its panes, a
+   base column for `diff3`, editing a picked line in place.
+3. ~~Repository tabs~~ — landed (`ui.tabs`). Next: drag to reorder, workspaces (`workspace.open`).
 4. **Diff quality** — `view.ignoreWhitespace` (`-w`), `view.wordDiff` (intra-line highlights),
    `view.syntax` (a pure-Rust highlighter).
 5. **Graph controls** — `graph.solo`, `graph.hide`, `graph.columns`, `diff.compare` (two selected commits).

@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod blame;
+pub mod conflict;
 pub mod diff;
 pub mod log;
 pub mod ops;
@@ -19,6 +20,7 @@ pub mod status;
 pub mod testing;
 
 pub use blame::{Blame, BlameCommit, BlameLine};
+pub use conflict::Chunk;
 pub use diff::{DiffLine, FileDiff, Hunk, LineKind};
 pub use log::{Commit, LogQuery, Signature};
 pub use ops::{Outcome, PullMode, ResetMode, Reworded};

@@ -13,9 +13,11 @@ pub mod dialogs;
 pub mod diff_view;
 pub mod graph_view;
 pub mod icons;
+pub mod merge_tool;
 pub mod palette;
 pub mod refs_panel;
 pub mod start;
+pub mod tabs;
 pub mod theme;
 pub mod toasts;
 pub mod toolbar;
@@ -55,6 +57,10 @@ pub struct Prefs {
     pub gravatar: bool,
     /// The terminal to open (`kitty --directory {dir}`); empty: the system's.
     pub terminal: String,
+    /// The repositories open in tabs, in order.
+    pub tabs: Vec<String>,
+    /// The shown one among `tabs`.
+    pub active_tab: usize,
 }
 
 impl Default for Prefs {
@@ -67,6 +73,8 @@ impl Default for Prefs {
             commit_limit: 2000,
             gravatar: true,
             terminal: String::new(),
+            tabs: Vec::new(),
+            active_tab: 0,
         }
     }
 }
@@ -94,6 +102,8 @@ pub struct Job {
     rx: Receiver<CmdResult>,
     /// A control-channel request waiting for the result.
     reply: Option<Sender<Value>>,
+    /// The tab it runs for (`tabs::Tabs::ids`).
+    tab: u64,
 }
 
 /// The status line.
@@ -146,6 +156,10 @@ pub struct GitApp {
     pub drop_menu: Option<graph_view::DropMenu>,
     /// The list of every label on a hovered graph pill.
     pub label_popup: Option<graph_view::LabelPopup>,
+    /// The merge tool for the conflicted file open in the center.
+    pub merge: Option<merge_tool::MergeTool>,
+    /// The other repositories open in tabs.
+    pub tabs: tabs::Tabs,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -191,6 +205,8 @@ impl GitApp {
             avatars,
             drop_menu: None,
             label_popup: None,
+            merge: None,
+            tabs: tabs::Tabs::default(),
         }
     }
 
@@ -211,8 +227,15 @@ impl GitApp {
         self.toast = Some(Toast { text, error, at: util::now_s() });
     }
 
-    /// Open the repository containing `path`; remembered in the recent list.
+    /// Open the repository containing `path`; remembered in the recent list. It opens in a new
+    /// tab when one is shown, and shows its tab when it's already open.
     pub fn open_repo(&mut self, path: &Path) -> Result<(), String> {
+        if let Ok(repo) = self.session.git.open(path)
+            && let Some(i) = self.tab_with(repo.root())
+        {
+            return self.switch_tab(i);
+        }
+        let new_tab = self.session.repo.is_some() && self.new_tab().is_ok();
         match self.session.open(path) {
             Ok(()) => {
                 let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).unwrap_or_else(|| path.to_path_buf());
@@ -221,6 +244,9 @@ impl GitApp {
                 Ok(())
             }
             Err(e) => {
+                if new_tab {
+                    let _ = self.close_tab(self.tabs.active);
+                }
                 let m = e.to_string();
                 self.status(m.clone(), true);
                 Err(m)
@@ -232,7 +258,17 @@ impl GitApp {
         self.pick = LinePick::default();
         self.blame = None;
         self.details = None;
+        self.merge = None;
         self.scroll_to_selection = true;
+        // Already open in another tab: show that one instead.
+        if let Some(root) = self.session.repo.as_ref().map(|r| r.root().to_path_buf())
+            && let Some(other) = (0..self.tabs.len())
+                .find(|&i| i != self.tabs.active && self.tab_session(i).and_then(|s| s.repo.as_ref()).is_some_and(|r| r.root() == root))
+        {
+            let _ = self.close_tab(self.tabs.active);
+            let _ = self.switch_tab(if other > self.tabs.active { other.saturating_sub(1) } else { other }.min(self.tabs.len().saturating_sub(1)));
+        }
+        self.sync_tab_prefs();
         let name = self.session.repo.as_ref().map(|r| r.name()).unwrap_or_default();
         self.status(format!("Opened {name}"), false);
     }
@@ -269,8 +305,13 @@ impl GitApp {
             self.spawn(spec.id, spec.label, params, reply);
             return Ok(json!({"started": spec.id}));
         }
+        // Opening or creating a repository while one is shown does it in a new tab.
+        let new_tab = matches!(id, "repo.open" | "repo.init") && self.session.repo.is_some() && self.new_tab().is_ok();
         let had_repo = self.session.repo.as_ref().map(|r| r.root().to_path_buf());
         let r = self.session.run(id, &params);
+        if new_tab && (r.is_err() || self.session.repo.is_none()) {
+            let _ = self.close_tab(self.tabs.active);
+        }
         self.after_command(id, &r, had_repo.as_deref());
         let r = r.map_err(|e| e.to_string());
         if let Some(tx) = reply {
@@ -311,6 +352,10 @@ impl GitApp {
                         self.scroll_to_selection = true;
                     }
                 }
+                // Closing the repository closes its tab when there are others.
+                if id == "repo.close" && self.tabs.len() > 1 {
+                    let _ = self.close_tab(self.tabs.active);
+                }
                 if id.starts_with("graph.select") || id == "commit.create" {
                     self.scroll_to_selection = true;
                 }
@@ -340,7 +385,7 @@ impl GitApp {
             Ok(_) => {
                 // Progress shows in the status bar only; the result gets a notification.
                 self.toast = Some(Toast { text: format!("{label}…"), error: false, at: util::now_s() });
-                self.jobs.push(Job { id, label, started: util::now_s(), rx, reply });
+                self.jobs.push(Job { id, label, started: util::now_s(), rx, reply, tab: self.tabs.active_id() });
             }
             Err(e) => self.status(format!("{label}: {e}"), true),
         }
@@ -351,34 +396,64 @@ impl GitApp {
         let mut done = Vec::new();
         self.jobs.retain(|j| match j.rx.try_recv() {
             Ok(r) => {
-                done.push((j.id, r, j.reply.clone()));
+                done.push((j.id, r, j.reply.clone(), j.tab));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), j.reply.clone()));
+                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), j.reply.clone(), j.tab));
                 false
             }
         });
-        for (id, r, reply) in done {
-            let reg = self.session.registry.clone();
-            if let Some(spec) = reg.get(id) {
-                if let Err(e) = self.session.refresh() {
-                    log::warn!("reload after {id}: {e}");
+        for (id, r, reply, tab) in done {
+            // A job for a hidden tab: show its tab while taking the result, then come back
+            // (unless the result asks something, which stays on its tab).
+            let back = self.tabs.active_id();
+            let away = match self.tabs.index_of(tab) {
+                Some(i) if i != self.tabs.active => self.switch_tab(i).is_ok(),
+                Some(_) => false,
+                None => {
+                    // Its tab was closed.
+                    if let Err(e) = &r {
+                        self.notify(None, e.to_string(), true);
+                    }
+                    if let Some(tx) = reply {
+                        let _ = tx.send(control::reply(&r.map_err(|e| e.to_string())));
+                    }
+                    continue;
                 }
-                self.session.note(spec, &r);
-            }
-            // A clone opens what it made.
-            if let Ok(v) = &r
-                && let Some(p) = v.get("open").and_then(Value::as_str)
+            };
+            let had_dialog = self.dialog.is_some();
+            self.take_job_result(id, r, reply);
+            // Stay when the result opened something (a clone's new tab) or asks something.
+            if away
+                && self.tabs.active_id() == tab
+                && (had_dialog || self.dialog.is_none())
+                && let Some(i) = self.tabs.index_of(back)
             {
-                let _ = self.open_repo(Path::new(p));
+                let _ = self.switch_tab(i);
             }
-            let had = self.session.repo.as_ref().map(|x| x.root().to_path_buf());
-            self.after_command(id, &r, had.as_deref());
-            if let Some(tx) = reply {
-                let _ = tx.send(control::reply(&r.map_err(|e| e.to_string())));
+        }
+    }
+
+    fn take_job_result(&mut self, id: &'static str, r: CmdResult, reply: Option<Sender<Value>>) {
+        let reg = self.session.registry.clone();
+        if let Some(spec) = reg.get(id) {
+            if let Err(e) = self.session.refresh() {
+                log::warn!("reload after {id}: {e}");
             }
+            self.session.note(spec, &r);
+        }
+        // A clone opens what it made.
+        if let Ok(v) = &r
+            && let Some(p) = v.get("open").and_then(Value::as_str)
+        {
+            let _ = self.open_repo(Path::new(p));
+        }
+        let had = self.session.repo.as_ref().map(|x| x.root().to_path_buf());
+        self.after_command(id, &r, had.as_deref());
+        if let Some(tx) = reply {
+            let _ = tx.send(control::reply(&r.map_err(|e| e.to_string())));
         }
     }
 
@@ -470,6 +545,7 @@ impl GitApp {
                 self.drop_menu = Some(m);
                 Ok(r)
             }
+            "ui.tabs" => self.tabs_command(v),
             "ui.filterRefs" => {
                 self.ref_filter = s("text").unwrap_or("").chars().take(200).collect();
                 Ok(json!({"text": self.ref_filter}))
@@ -495,6 +571,8 @@ impl GitApp {
                 "status": self.toast.as_ref().map(|t| json!({"text": t.text, "error": t.error})),
                 "appearance": self.prefs.appearance.code(),
                 "recent": self.prefs.recent,
+                "tabs": self.tab_list().into_iter().map(|(t, p)| json!({"title": t, "path": p.map(|p| p.display().to_string())})).collect::<Vec<_>>(),
+                "activeTab": self.tabs.active,
             })),
             other => Err(format!("unknown command `{other}`")),
         }
@@ -592,6 +670,23 @@ impl GitApp {
         {
             fire.push("ui.commandPalette");
         }
+        // Tabs: new, next, previous.
+        let mut tab_action = None;
+        if let Some((m, k)) = util::parse_shortcut("Mod+T")
+            && ctx.input_mut(|i| i.consume_key(m, k))
+        {
+            tab_action = Some("new");
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Tab)) {
+            tab_action = Some("previous");
+        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab)) {
+            tab_action = Some("next");
+        }
+        if let Some(a) = tab_action
+            && let Err(e) = self.tabs_command(&json!({"action": a}))
+        {
+            self.status(e, true);
+        }
         for spec in reg.all() {
             if spec.shortcut.is_empty() {
                 continue;
@@ -626,6 +721,7 @@ impl GitApp {
     /// Lay out the window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        tabs::show(self, ui);
         toolbar::show(self, ui);
         toolbar::status_bar(self, ui);
         if self.session.repo.is_none() {
@@ -636,7 +732,10 @@ impl GitApp {
             }
             commit_panel::show(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(&ctx).bg)).show(ui, |ui| {
-                if self.session.sel.file.is_some() {
+                if let Some(path) = self.conflicted_selection() {
+                    merge_tool::show(self, ui, &path);
+                } else if self.session.sel.file.is_some() {
+                    self.merge = None;
                     diff_view::show(self, ui);
                 } else {
                     graph_view::show(self, ui);
@@ -646,6 +745,13 @@ impl GitApp {
         dialogs::show(self, &ctx);
         palette::show(self, &ctx);
         self.toasts.show(&ctx, 24.0);
+    }
+
+    /// The file open in the center when it's in conflict (it opens in the merge tool).
+    pub fn conflicted_selection(&self) -> Option<String> {
+        let sel = self.session.sel.file.as_ref()?;
+        let conflicted = sel.area == gitcraft_engine::Area::Unstaged && self.session.data.status.conflicted().any(|f| f.path == sel.path);
+        conflicted.then(|| sel.path.clone())
     }
 
     /// Whether a command is enabled, and why not.

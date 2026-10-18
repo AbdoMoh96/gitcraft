@@ -139,8 +139,18 @@ Integrations|Hosting|Launchpad|launchpad.open
 
 /// Commands implemented by the UI (`ui.*`), not the engine. `gitcraft-ui-egui` checks that it
 /// handles each of these.
-pub const UI_COMMANDS: &[&str] =
-    &["ui.revealRepo", "ui.terminal", "ui.recent", "ui.copySha", "ui.filterRefs", "ui.commandPalette", "ui.shortcuts", "ui.theme", "ui.preferences"];
+pub const UI_COMMANDS: &[&str] = &[
+    "ui.revealRepo",
+    "ui.terminal",
+    "ui.recent",
+    "ui.tabs",
+    "ui.copySha",
+    "ui.filterRefs",
+    "ui.commandPalette",
+    "ui.shortcuts",
+    "ui.theme",
+    "ui.preferences",
+];
 
 pub struct Entry {
     pub area: &'static str,
@@ -214,7 +224,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 86;
+    const FLOOR: usize = 91;
 
     #[test]
     fn parity_floor() {

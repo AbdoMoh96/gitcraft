@@ -83,6 +83,7 @@ pub fn entries(app: &GitApp, query: &str) -> Vec<Entry> {
         ("ui.theme", "Switch Light/Dark Theme", "View"),
         ("ui.revealRepo", "Show in File Manager", "Repository"),
         ("ui.terminal", "Open Terminal", "Repository"),
+        ("ui.tabs", "New Tab", "Tabs"),
     ] {
         if let Some(sc) = score(query, label) {
             v.push((sc, Entry { label: label.into(), detail: loc.into(), target: Target::Command(id), disabled: None }));
@@ -111,6 +112,8 @@ fn activate(app: &mut GitApp, e: &Entry) {
             // Commands that need a name or a choice open their dialog.
             if let Some(d) = Dialog::named(id, &app.session, &json!({})).filter(|_| !matches!(*id, "stash.save")) {
                 app.dialog = Some(d);
+            } else if *id == "ui.tabs" {
+                let _ = app.ui_command(id, &json!({"action": "new"}));
             } else if id.starts_with("ui.") {
                 let _ = app.ui_command(id, &json!({}));
             } else if *id == "commit.reword" {
