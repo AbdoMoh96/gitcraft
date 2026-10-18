@@ -58,6 +58,10 @@ cargo run --release -p gitcraft -- ~/src/project   # a repository
 cargo run --release -p gitcraft -- --sample        # a throwaway sample repository
 ```
 
+Build and install from source for the current user (Arch and other Linux desktops; no sudo):
+`install/arch/install.sh` puts `gitcraft` and `gitcraft-cli` in `~/.local/bin` with a desktop entry
+and icon; `install/arch/uninstall.sh [--purge]` removes them.
+
 ## For agents: CLI and MCP
 
 ```sh
