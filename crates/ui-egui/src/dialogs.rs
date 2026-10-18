@@ -467,6 +467,8 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 app.prefs.commit_limit = n;
             }
             ui.checkbox(&mut app.prefs.reopen_last, "Reopen the last repository at start");
+            ui.checkbox(&mut app.prefs.conflict_check, "Warn when merging the target or upstream branch would conflict")
+                .on_hover_text("Merges in memory in the background after each change; nothing on disk is touched");
             if ui
                 .checkbox(&mut app.prefs.gravatar, "Show author pictures from Gravatar")
                 .on_hover_text("Sends a hash of each author's e-mail address to gravatar.com")

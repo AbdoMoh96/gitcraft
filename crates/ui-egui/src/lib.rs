@@ -8,6 +8,7 @@
 
 pub mod avatars;
 pub mod commit_panel;
+pub mod conflict_alert;
 pub mod control;
 pub mod dialogs;
 pub mod diff_view;
@@ -61,6 +62,8 @@ pub struct Prefs {
     pub tabs: Vec<String>,
     /// The shown one among `tabs`.
     pub active_tab: usize,
+    /// Warn in the toolbar when merging the upstream or the target branch would conflict.
+    pub conflict_check: bool,
 }
 
 impl Default for Prefs {
@@ -75,6 +78,7 @@ impl Default for Prefs {
             terminal: String::new(),
             tabs: Vec::new(),
             active_tab: 0,
+            conflict_check: true,
         }
     }
 }
@@ -160,6 +164,8 @@ pub struct GitApp {
     pub merge: Option<merge_tool::MergeTool>,
     /// The other repositories open in tabs.
     pub tabs: tabs::Tabs,
+    /// Merge conflicts predicted in the background.
+    pub conflict_alert: conflict_alert::ConflictAlert,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -207,6 +213,7 @@ impl GitApp {
             label_popup: None,
             merge: None,
             tabs: tabs::Tabs::default(),
+            conflict_alert: conflict_alert::ConflictAlert::default(),
         }
     }
 
@@ -583,6 +590,7 @@ impl GitApp {
         ctx.set_theme(self.prefs.appearance.preference());
         self.poll_jobs();
         self.poll_control(ctx);
+        self.poll_conflict_alert();
         self.avatars.poll(ctx);
         if let Some(text) = self.pending_copy.take() {
             ctx.copy_text(text);
@@ -608,7 +616,7 @@ impl GitApp {
             }
         }
         self.was_focused = focused;
-        if !self.jobs.is_empty() {
+        if !self.jobs.is_empty() || self.conflict_alert.pending() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         } else if focused {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CHECK_EVERY_S));

@@ -102,6 +102,18 @@ fn conflict_at(lines: &[&str], start: usize) -> Option<(Chunk, usize)> {
     None
 }
 
+/// `git merge-tree --write-tree --name-only -z` output: the tree id, then each conflicted file.
+pub fn parse_merge_tree(out: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    // An empty field ends the file list (informational messages may follow).
+    for f in out.split('\0').skip(1).take_while(|f| !f.is_empty()) {
+        if !files.iter().any(|x| x == f) {
+            files.push(f.to_string());
+        }
+    }
+    files
+}
+
 /// Whether text has at least one whole conflict.
 pub fn has_conflicts(chunks: &[Chunk]) -> bool {
     chunks.iter().any(|c| matches!(c, Chunk::Conflict { .. }))
@@ -157,6 +169,29 @@ impl Repo {
         Ok(Some(o.text()))
     }
 
+    /// The files that would conflict if `theirs` were merged into `ours` (both commits or branch
+    /// names), worked out in memory by `git merge-tree` without touching the index or work tree.
+    /// `None` when this git can't (before 2.38) or the two have no common history.
+    pub fn merge_conflicts(&self, ours: &str, theirs: &str) -> Result<Option<Vec<String>>> {
+        let ours = crate::check_name("ours", ours)?;
+        let theirs = crate::check_name("theirs", theirs)?;
+        let o = self.run(&["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs])?;
+        match o.code {
+            Some(0) => Ok(Some(Vec::new())),
+            Some(1) => Ok(Some(parse_merge_tree(&o.text()))),
+            _ => Ok(None),
+        }
+    }
+
+    /// The branch `origin/HEAD` points at (`origin/main`), the usual merge target.
+    pub fn remote_head(&self, remote: &str) -> Option<String> {
+        let remote = crate::check_name("remote", remote).ok()?;
+        let r = format!("refs/remotes/{remote}/HEAD");
+        let o = self.run(&["symbolic-ref", "-q", "--short", r.as_str()]).ok()?;
+        let name = o.text().trim().to_string();
+        (o.ok() && !name.is_empty()).then_some(name)
+    }
+
     /// Resolve a conflicted file with `content` (the merge tool's output) and stage it.
     pub fn resolve_content(&self, path: &str, content: &[u8]) -> Result<()> {
         let path = check_path(path)?;
@@ -209,6 +244,9 @@ mod tests {
 
     #[test]
     fn junk_never_panics() {
+        for s in ["", "\0", "\0\0", "abc\0f\0\0msg"] {
+            let _ = parse_merge_tree(s);
+        }
         for s in ["", "\n", "<<<<<<<", "=======\n>>>>>>>\n", "<<<<<<< \n||||||| \n||||||| \n=======\n=======\n>>>>>>>", "é<<<<<<<é\n", "\r\r\n\0"] {
             let _ = parse(s);
         }
@@ -230,6 +268,13 @@ mod tests {
         r.checkout_branch("main").unwrap();
         write(&r, "f.txt", "one\nTWO ours\nthree\n").unwrap();
         commit_all(&r, "ours").unwrap();
+        // Predicted before merging, without touching the work tree.
+        if let Some(files) = r.merge_conflicts("HEAD", "other").unwrap() {
+            assert_eq!(files, vec!["f.txt".to_string()]);
+            assert_eq!(r.merge_conflicts("HEAD", "HEAD").unwrap(), Some(vec![]));
+        }
+        assert_eq!(r.status().unwrap().files.len(), 0);
+        assert!(r.merge_conflicts("HEAD", "--output=x").is_err());
         assert!(r.merge("other", false, false).unwrap().conflicts);
         let stages = r.conflict_stages("f.txt").unwrap();
         assert!(stages.iter().all(Option::is_some));
@@ -247,6 +292,7 @@ mod tests {
             }));
         }
         assert!(r.resolve_content("../x", b"").is_err());
+        assert_eq!(parse_merge_tree("t\0f\0g\0f\0\0info"), vec!["f".to_string(), "g".to_string()]);
         assert!(r.resolve_content(".git/config", b"").is_err());
         r.resolve_content("f.txt", b"one\nTWO ours\nTWO theirs\nthree\n").unwrap();
         assert_eq!(r.status().unwrap().conflicted().count(), 0);

@@ -208,6 +208,15 @@ fn conflicts_resolve_and_continue() {
     run(&mut s, "branch.checkout", json!({"name": "main"}));
     write(&repo, "README.md", "main side\n").unwrap();
     run(&mut s, "commit.stageAllAndCommit", json!({"summary": "main readme"}));
+    // Predicted against a target before merging.
+    let p = run(&mut s, "conflict.predict", json!({"target": "feature"}));
+    if p["supported"] == json!(true) {
+        assert_eq!(p["conflicts"], json!(true));
+        assert_eq!(p["checks"][0]["files"], json!(["README.md"]));
+    }
+    assert!(s.run("conflict.predict", &json!({"target": "-x"})).is_err());
+    // The default target is main: nothing to check on main itself.
+    assert_eq!(run(&mut s, "conflict.predict", json!({}))["checks"], json!([]));
     let r = run(&mut s, "merge.into", json!({"ref": "feature"}));
     assert_eq!(r["conflicts"], json!(true));
     assert_eq!(s.inspect()["conflicts"], json!(["README.md"]));

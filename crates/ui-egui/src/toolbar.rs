@@ -97,6 +97,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 if tool(app, ui, Icon::Terminal, "Terminal", "ui.terminal") {
                     let _ = app.run("ui.terminal", json!({}));
                 }
+                if !app.conflict_warnings().is_empty() {
+                    separator(ui);
+                    crate::conflict_alert::show(app, ui);
+                }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let dark = ui.ctx().global_style().visuals.dark_mode;
                     if icons::button(ui, if dark { Icon::Sun } else { Icon::Moon }, "Switch light and dark", None, 18.0).clicked() {

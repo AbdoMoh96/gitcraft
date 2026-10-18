@@ -5,6 +5,7 @@
 //! Lays out GitCraft over a sample repository (with a feature branch, a merge, a tag, a stash and
 //! work in progress), runs the commands in order (`ui.*` ones too, e.g.
 //! `--cmd 'ui.dialog={"name":"branch.create"}'`), renders with wgpu and writes the PNG.
+//! `--diverge` checks out `fix/typo` with a change that would conflict with `main`.
 //! `--conflict` stops in a merge with a conflict in `src/main.rs` instead of the work in progress.
 
 use gitcraft_engine::Session;
@@ -58,6 +59,11 @@ fn main() -> Result<(), String> {
     write(&repo, "src/main.rs", "fn main() {\n    let who = \"world\";\n    println!(\"hello, {who}\");\n}\n").map_err(|e| e.to_string())?;
     step(commit_all(&repo, "Name who we greet"))?;
     let conflict = args.iter().any(|a| a == "--conflict");
+    if args.iter().any(|a| a == "--diverge") {
+        repo.checkout_branch("fix/typo").map_err(|e| e.to_string())?;
+        write(&repo, "src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n").map_err(|e| e.to_string())?;
+        step(commit_all(&repo, "Say hi"))?;
+    }
     if conflict {
         repo.merge("fix/typo", false, false).map_err(|e| e.to_string())?;
     }
@@ -84,6 +90,15 @@ fn main() -> Result<(), String> {
     harness.ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
     gitcraft_ui_egui::theme::style(&harness.ctx);
     harness.run_steps(3);
+    // Let background checks (conflict prediction) finish.
+    for _ in 0..50 {
+        if !harness.state().conflict_alert.pending() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
     for (id, p) in cmds {
         let r = harness.state_mut().run(&id, p);
         if let Err(e) = r {

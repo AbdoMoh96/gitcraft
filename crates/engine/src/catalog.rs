@@ -113,6 +113,7 @@ Diff View|Changes|Ignore Whitespace|view.ignoreWhitespace
 Diff View|Changes|Word Highlighting|view.wordDiff
 Diff View|Changes|Syntax Highlighting|view.syntax
 Merge|Conflicts|Conflict Detection|repo.status
+Merge|Conflicts|Conflict Prevention|conflict.predict
 Merge|Conflicts|Take Ours|conflict.takeOurs
 Merge|Conflicts|Take Theirs|conflict.takeTheirs
 Merge|Conflicts|Mark Resolved|conflict.markResolved
@@ -224,7 +225,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 91;
+    const FLOOR: usize = 92;
 
     #[test]
     fn parity_floor() {

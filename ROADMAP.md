@@ -4,15 +4,20 @@
 
 | Number | Value |
 |---|---|
-| Feature parity | 91 / 124 (73.4%) |
-| Commands | 80 engine + 13 UI |
-| Tests | 76 (`cargo xtask stats`) |
-| Lines of Rust | ~13,900 |
+| Feature parity | 92 / 125 (73.6%) |
+| Commands | 81 engine + 13 UI |
+| Tests | 78 (`cargo xtask stats`) |
+| Lines of Rust | ~14,200 |
 
 Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked work:
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-18 — M2.** Conflict prevention (`conflict.predict`): after every reload a background
+  check merges the current branch in memory (`git merge-tree --write-tree`, git 2.38+) with its
+  upstream when behind and with the target branch (`origin/HEAD`, else main / master). When either
+  would conflict, the toolbar shows "Conflicts with <branch>"; a click lists the files. Nothing on
+  disk is touched; Preferences can turn it off.
 - **2026-10-18 — M2.** Merge tool (`conflict.edit`): clicking a conflicted file opens the current
   (ours) and incoming (theirs) sides side by side, aligned conflict by conflict; a box per conflict
   takes that side's whole hunk and a box per line takes single lines, which go to the output below
