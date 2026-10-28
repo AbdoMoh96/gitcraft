@@ -9,7 +9,7 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
    todo list editor driven by `GIT_SEQUENCE_EDITOR` writing a prepared todo file.
 2. ~~Merge tool output editor~~ — landed (`conflict.edit`). Next: syntax colours in its panes, a
    base column for `diff3`, editing a picked line in place.
-3. ~~Repository tabs~~ — landed (`ui.tabs`). Next: drag to reorder, workspaces (`workspace.open`).
+3. ~~Repository tabs~~ — landed (`ui.tabs`). Drag to reorder landed. Next: workspaces (`workspace.open`).
 4. **Diff quality** — `view.ignoreWhitespace` (`-w`), `view.wordDiff` (intra-line highlights),
    `view.syntax` (a pure-Rust highlighter).
 5. **Graph controls** — `graph.solo`, `graph.hide`, `graph.columns`, `diff.compare` (two selected commits).

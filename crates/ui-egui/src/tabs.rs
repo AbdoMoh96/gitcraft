@@ -2,9 +2,10 @@
 //! `GitApp`'s own fields (`session`, the line pick, caches); the others are parked here and
 //! swapped in when picked.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use egui::{Frame, Margin, Sense, Stroke, pos2, vec2};
+use egui::{Frame, Margin, Rect, Sense, Stroke, pos2, vec2};
 use gitcraft_engine::Session;
 use serde_json::{Value, json};
 
@@ -32,11 +33,15 @@ pub struct Tabs {
     /// Each tab's id, for background jobs to find their tab again.
     pub ids: Vec<u64>,
     next_id: u64,
+    /// Where each tab is drawn, in slots (by id); eases toward its index so tabs slide.
+    pos: HashMap<u64, f32>,
+    /// The tab being dragged and where on it the pointer grabbed it.
+    drag: Option<(u64, f32)>,
 }
 
 impl Default for Tabs {
     fn default() -> Self {
-        Tabs { slots: vec![None], active: 0, ids: vec![0], next_id: 1 }
+        Tabs { slots: vec![None], active: 0, ids: vec![0], next_id: 1, pos: HashMap::new(), drag: None }
     }
 }
 
@@ -146,6 +151,25 @@ impl GitApp {
         Ok(())
     }
 
+    /// Move tab `from` to index `to`; the other tabs shift over and the shown tab stays shown.
+    pub fn move_tab(&mut self, from: usize, to: usize) -> Result<(), String> {
+        let n = self.tabs.len();
+        if from >= n || to >= n {
+            return Err("no such tab".into());
+        }
+        if from == to {
+            return Ok(());
+        }
+        let active_id = self.tabs.active_id();
+        let slot = self.tabs.slots.remove(from);
+        self.tabs.slots.insert(to, slot);
+        let id = self.tabs.ids.remove(from);
+        self.tabs.ids.insert(to, id);
+        self.tabs.active = self.tabs.index_of(active_id).unwrap_or(0);
+        self.sync_tab_prefs();
+        Ok(())
+    }
+
     /// The tab showing the repository at `root`.
     pub fn tab_with(&self, root: &Path) -> Option<usize> {
         (0..self.tabs.len()).find(|&i| self.tab_session(i).and_then(repo_root).as_deref() == Some(root))
@@ -197,7 +221,7 @@ impl GitApp {
         self.sync_tab_prefs();
     }
 
-    /// `ui.tabs`: list, open, show or close tabs.
+    /// `ui.tabs`: list, open, show, move or close tabs.
     pub(crate) fn tabs_command(&mut self, v: &Value) -> Result<Value, String> {
         let index = || v.get("index").and_then(Value::as_u64).map(|i| i as usize).ok_or("`index` is required");
         match v.get("action").and_then(Value::as_str).unwrap_or("list") {
@@ -211,21 +235,35 @@ impl GitApp {
                 let step = if v.get("action").and_then(Value::as_str) == Some("next") { 1 } else { n - 1 };
                 self.switch_tab((self.tabs.active + step) % n)?;
             }
+            "move" => {
+                let from = v.get("index").and_then(Value::as_u64).map(|i| i as usize).unwrap_or(self.tabs.active);
+                let n = self.tabs.len();
+                let to = match (v.get("to").and_then(Value::as_u64), v.get("by").and_then(Value::as_i64)) {
+                    (Some(to), _) => to as usize,
+                    (None, Some(by)) => (from as i64).saturating_add(by).clamp(0, n.saturating_sub(1) as i64) as usize,
+                    (None, None) => return Err("`to` (an index) or `by` (a step) is required".into()),
+                };
+                self.move_tab(from, to)?;
+            }
             "close" => {
                 let i = v.get("index").and_then(Value::as_u64).map(|i| i as usize).unwrap_or(self.tabs.active);
                 self.close_tab(i)?;
             }
-            other => return Err(format!("`action` is list, new, switch, next, previous or close (not `{other}`)")),
+            other => return Err(format!("`action` is list, new, switch, next, previous, move or close (not `{other}`)")),
         }
         let tabs: Vec<Value> = self.tab_list().into_iter().map(|(t, p)| json!({"title": t, "path": p.map(|p| p.display().to_string())})).collect();
         Ok(json!({"tabs": tabs, "active": self.tabs.active}))
     }
 }
 
-/// The tab strip above the toolbar.
+/// How fast tabs slide into place (per second; higher is snappier).
+const SLIDE: f32 = 18.0;
+
+/// The tab strip above the toolbar. Tabs drag to reorder: the grabbed tab follows the
+/// pointer and the others slide aside as it passes their middle.
 pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
-    let mut action: Option<Value> = None;
+    let mut actions: Vec<Value> = Vec::new();
     egui::Panel::top("tabs")
         .exact_size(32.0)
         .frame(Frame::NONE.fill(t.panel).inner_margin(Margin { left: 6, right: 6, top: 4, bottom: 0 }).stroke(Stroke::new(1.0, t.border)))
@@ -233,64 +271,130 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let list = app.tab_list();
-                let n = list.len();
+                let ids = app.tabs.ids.clone();
+                let n = list.len().min(ids.len());
                 let w = ((ui.available_width() - 34.0) / n.max(1) as f32).clamp(90.0, 220.0);
-                for (i, (name, path)) in list.iter().enumerate() {
+                let step = w + 2.0;
+                let (strip, _) = ui.allocate_exact_size(vec2((step * n as f32 - 2.0).max(0.0), 28.0), Sense::hover());
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let ease = 1.0 - (-ui.input(|i| i.stable_dt).clamp(0.0, 0.1) * SLIDE).exp();
+                let last = n.saturating_sub(1) as f32;
+
+                app.tabs.pos.retain(|id, _| ids.contains(id));
+                if app.tabs.drag.is_some_and(|(id, _)| !ids.contains(&id)) {
+                    app.tabs.drag = None;
+                }
+                // The dragged tab is drawn last, on top of the others.
+                let dragged = app.tabs.drag.and_then(|(id, _)| app.tabs.index_of(id));
+                let order = (0..n).filter(|&i| Some(i) != dragged).chain(dragged);
+                let mut sliding = false;
+                for i in order {
+                    let (Some((name, path)), Some(&id)) = (list.get(i), ids.get(i)) else { continue };
+                    let target = i as f32;
+                    let pos = match (app.tabs.drag, pointer) {
+                        (Some((d, grab)), Some(p)) if d == id => ((p.x - grab - strip.left()) / step).clamp(0.0, last),
+                        _ => {
+                            let cur = app.tabs.pos.get(&id).copied().unwrap_or(target);
+                            let next = cur + (target - cur) * ease;
+                            if (target - next).abs() < 0.002 {
+                                target
+                            } else {
+                                sliding = true;
+                                next
+                            }
+                        }
+                    };
+                    app.tabs.pos.insert(id, pos);
+                    let rect = Rect::from_min_size(pos2(strip.left() + pos * step, strip.top()), vec2(w, 28.0));
                     let active = i == app.tabs.active;
-                    let (rect, resp) = ui.allocate_exact_size(vec2(w, 28.0), Sense::click());
+                    let resp = ui.interact(rect, ui.id().with(("tab", id)), Sense::click_and_drag());
+                    if resp.drag_started()
+                        && let Some(p) = pointer
+                    {
+                        app.tabs.drag = Some((id, p.x - rect.left()));
+                        if !active {
+                            actions.push(json!({"action": "switch", "index": i}));
+                        }
+                    }
+                    let held = app.tabs.drag.is_some_and(|(d, _)| d == id);
+                    if held {
+                        if resp.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                            let to = (pos.round().max(0.0) as usize).min(n.saturating_sub(1));
+                            if to != i {
+                                actions.push(json!({"action": "move", "index": i, "to": to}));
+                            }
+                        } else {
+                            app.tabs.drag = None;
+                        }
+                    }
+                    let lit = active || held;
                     let p = ui.painter();
-                    let fill = if active {
+                    let fill = if lit {
                         t.bg
                     } else if resp.hovered() {
                         t.hover
                     } else {
                         t.panel
                     };
-                    p.rect_filled(rect, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, fill);
-                    if active {
+                    let radius = egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 };
+                    if held {
+                        p.add(
+                            egui::epaint::Shadow { offset: [0, 2], blur: 10, spread: 0, color: egui::Color32::from_black_alpha(60) }
+                                .as_shape(rect, radius),
+                        );
+                    }
+                    p.rect_filled(rect, radius, fill);
+                    if lit {
                         p.line_segment([rect.left_top() + vec2(6.0, 0.0), rect.right_top() - vec2(6.0, 0.0)], Stroke::new(2.0, t.accent));
-                    } else if i + 1 != app.tabs.active && i + 1 < n {
+                    } else if app.tabs.drag.is_none() && i + 1 != app.tabs.active && i + 1 < n {
                         p.line_segment(
                             [pos2(rect.right() + 1.0, rect.top() + 7.0), pos2(rect.right() + 1.0, rect.bottom() - 7.0)],
                             Stroke::new(1.0, t.border),
                         );
                     }
-                    let icon = egui::Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(14.0, 14.0));
-                    icons::paint(p, icon, Icon::Folder, if active { t.text } else { t.dim }, t.accent);
-                    let close = egui::Rect::from_center_size(pos2(rect.right() - 14.0, rect.center().y), vec2(16.0, 16.0));
-                    let text_rect = egui::Rect::from_min_max(pos2(icon.right() + 6.0, rect.top()), pos2(close.left() - 2.0, rect.bottom()));
+                    let icon = Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), vec2(14.0, 14.0));
+                    icons::paint(p, icon, Icon::Folder, if lit { t.text } else { t.dim }, t.accent);
+                    let close = Rect::from_center_size(pos2(rect.right() - 14.0, rect.center().y), vec2(16.0, 16.0));
+                    let text_rect = Rect::from_min_max(pos2(icon.right() + 6.0, rect.top()), pos2(close.left() - 2.0, rect.bottom()));
                     p.with_clip_rect(text_rect).text(
                         pos2(text_rect.left(), rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         name,
                         egui::FontId::proportional(12.5),
-                        if active { t.text } else { t.dim },
+                        if lit { t.text } else { t.dim },
                     );
-                    let cr = ui.interact(close, ui.id().with(("tab_close", i)), Sense::click());
-                    if resp.hovered() || cr.hovered() || active {
+                    let cr = ui.interact(close, ui.id().with(("tab_close", id)), Sense::click());
+                    if resp.hovered() || cr.hovered() || lit {
                         if cr.hovered() {
                             ui.painter().rect_filled(close, 4.0, t.chrome);
                         }
                         icons::paint(ui.painter(), close.shrink(3.0), Icon::Close, t.dim, t.accent);
                     }
                     if cr.clicked() || resp.middle_clicked() {
-                        action = Some(json!({"action": "close", "index": i}));
+                        actions.push(json!({"action": "close", "index": i}));
                     } else if resp.clicked() {
-                        action = Some(json!({"action": "switch", "index": i}));
+                        actions.push(json!({"action": "switch", "index": i}));
                     }
-                    let tip = path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "Open, clone or start a repository".into());
-                    resp.on_hover_text(tip);
+                    if app.tabs.drag.is_none() {
+                        let tip = path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "Open, clone or start a repository".into());
+                        resp.on_hover_text(tip);
+                    }
+                }
+                if sliding {
+                    ui.ctx().request_repaint();
                 }
                 ui.add_space(4.0);
                 if icons::button(ui, Icon::Plus, &format!("New tab ({})", crate::util::shortcut_label("Mod+T")), None, 15.0).clicked() {
-                    action = Some(json!({"action": "new"}));
+                    actions.push(json!({"action": "new"}));
                 }
             });
         });
-    if let Some(a) = action
-        && let Err(e) = app.tabs_command(&a)
-    {
-        app.status(e, true);
+    for a in actions {
+        if let Err(e) = app.tabs_command(&a) {
+            app.status(e, true);
+            break;
+        }
     }
 }
 
@@ -349,6 +453,25 @@ mod tests {
         assert!(app.tabs_command(&json!({"action": "close", "index": 99})).is_err());
         assert!(app.tabs_command(&json!({"action": "nope"})).is_err());
         assert!(app.tabs_command(&json!({"action": "switch"})).is_err());
+
+        // Moving tabs keeps the shown one shown.
+        app.tabs_command(&json!({"action": "new"})).unwrap();
+        app.open_repo(r1.root()).unwrap();
+        assert_eq!((app.tabs.len(), app.tabs.active), (2, 1));
+        let v = app.tabs_command(&json!({"action": "move", "index": 1, "to": 0})).unwrap();
+        assert_eq!(v["active"], json!(0));
+        assert_eq!(app.session.repo.as_ref().unwrap().root(), r1.root());
+        assert_eq!(app.prefs.tabs[0], r1.root().display().to_string());
+        app.tabs_command(&json!({"action": "move", "by": 5})).unwrap();
+        assert_eq!(app.tabs.active, 1);
+        app.tabs_command(&json!({"action": "move", "index": 1, "by": -9})).unwrap();
+        assert_eq!(app.tabs.active, 0);
+        app.tabs_command(&json!({"action": "switch", "index": 1})).unwrap();
+        assert!(app.session.repo.is_none());
+        assert!(app.tabs_command(&json!({"action": "move", "index": 0, "to": 9})).is_err());
+        assert!(app.tabs_command(&json!({"action": "move", "index": 9, "to": 0})).is_err());
+        assert!(app.tabs_command(&json!({"action": "move"})).is_err());
+        app.tabs_command(&json!({"action": "close", "index": 0})).unwrap();
 
         // Restoring the last run's tabs.
         app.restore_tabs(&[r1.root().display().to_string(), "/no/such/folder".into(), r2.root().display().to_string()], 1);

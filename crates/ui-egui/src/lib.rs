@@ -678,20 +678,25 @@ impl GitApp {
         {
             fire.push("ui.commandPalette");
         }
-        // Tabs: new, next, previous.
+        // Tabs: new, next, previous, move left / right.
         let mut tab_action = None;
         if let Some((m, k)) = util::parse_shortcut("Mod+T")
             && ctx.input_mut(|i| i.consume_key(m, k))
         {
-            tab_action = Some("new");
+            tab_action = Some(json!({"action": "new"}));
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Tab)) {
-            tab_action = Some("previous");
+        let ctrl_shift = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+        if ctx.input_mut(|i| i.consume_key(ctrl_shift, egui::Key::Tab)) {
+            tab_action = Some(json!({"action": "previous"}));
         } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab)) {
-            tab_action = Some("next");
+            tab_action = Some(json!({"action": "next"}));
+        } else if ctx.input_mut(|i| i.consume_key(ctrl_shift, egui::Key::PageUp)) {
+            tab_action = Some(json!({"action": "move", "by": -1}));
+        } else if ctx.input_mut(|i| i.consume_key(ctrl_shift, egui::Key::PageDown)) {
+            tab_action = Some(json!({"action": "move", "by": 1}));
         }
         if let Some(a) = tab_action
-            && let Err(e) = self.tabs_command(&json!({"action": a}))
+            && let Err(e) = self.tabs_command(&a)
         {
             self.status(e, true);
         }

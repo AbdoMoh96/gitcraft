@@ -13,6 +13,10 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M3.** Tab reordering: drag a tab along the strip and the others slide aside as it
+  passes their middle (eased, frame-rate independent); release settles it into its slot.
+  Ctrl+Shift+PageUp / PageDown move the shown tab; `ui.tabs` `move` (`index`, `to` or `by`) for
+  agents. The new order is what reopens at the next start.
 - **2026-10-18 — M2.** Conflict prevention (`conflict.predict`): after every reload a background
   check merges the current branch in memory (`git merge-tree --write-tree`, git 2.38+) with its
   upstream when behind and with the target branch (`origin/HEAD`, else main / master). When either

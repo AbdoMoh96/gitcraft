@@ -207,3 +207,55 @@ fn hover_lists_every_branch_on_a_commit() {
     frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(1000.0, 800.0))]);
     assert!(a.label_popup.is_none());
 }
+
+/// Dragging a tab along the strip reorders the tabs; a plain click still switches.
+#[test]
+fn drag_a_tab_to_reorder() {
+    let (_d, mut a) = app("ui-tab-drag");
+    let (_d2, r2) = sample("ui-tab-drag-b").unwrap();
+    let (_d3, r3) = sample("ui-tab-drag-c").unwrap();
+    let r1 = a.session.repo().unwrap().root().to_path_buf();
+    a.open_repo(r2.root()).unwrap();
+    a.open_repo(r3.root()).unwrap();
+    a.switch_tab(0).unwrap();
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let frame = |a: &mut GitApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+    };
+    let roots = |a: &GitApp| a.tab_list().into_iter().map(|(_, p)| p.unwrap()).collect::<Vec<_>>();
+    frame(&mut a, vec![]);
+    frame(&mut a, vec![]);
+    // Three 220-wide tabs from x = 6, 2 apart.
+    let tab = |i: f32| egui::pos2(6.0 + 110.0 + i * 222.0, 18.0);
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(0.0)), button(tab(0.0), true)]);
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(0.0) + egui::vec2(20.0, 0.0))]);
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(1.2))]);
+    assert_eq!(roots(&a)[1], r1, "passing the next tab's middle swaps them");
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(2.0))]);
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(2.0))]);
+    frame(&mut a, vec![button(tab(2.0), false)]);
+    for _ in 0..3 {
+        frame(&mut a, vec![]);
+    }
+    assert_eq!(roots(&a), vec![r2.root().to_path_buf(), r3.root().to_path_buf(), r1.clone()]);
+    assert_eq!(a.tabs.active, 2);
+    assert_eq!(a.session.repo().unwrap().root(), r1);
+    assert_eq!(a.prefs.tabs.last().unwrap(), &r1.display().to_string());
+    // A click without moving switches tabs.
+    frame(&mut a, vec![egui::Event::PointerMoved(tab(0.0)), button(tab(0.0), true)]);
+    frame(&mut a, vec![button(tab(0.0), false)]);
+    frame(&mut a, vec![]);
+    assert_eq!(a.tabs.active, 0);
+    assert_eq!(a.session.repo().unwrap().root(), r2.root());
+}
