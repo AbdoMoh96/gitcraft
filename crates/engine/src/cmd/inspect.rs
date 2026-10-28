@@ -22,6 +22,7 @@ fn log(s: &mut Session, v: &Value) -> CmdResult {
         follow: p::str(v, "path").is_some_and(|x| !x.is_empty()),
         grep: p::str(v, "grep").map(str::to_string),
         author: p::str(v, "author").map(str::to_string),
+        exclude: Vec::new(),
     };
     let mut q = q;
     if q.path.is_some() && q.revs.is_empty() {

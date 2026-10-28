@@ -51,11 +51,14 @@ pub struct LogQuery {
     pub grep: Option<String>,
     /// Only commits by this author (substring of name or email).
     pub author: Option<String>,
+    /// With no `revs`: refs (or globs, `refs/remotes/*`) whose commits are left out unless another
+    /// ref reaches them.
+    pub exclude: Vec<String>,
 }
 
 impl Default for LogQuery {
     fn default() -> Self {
-        LogQuery { revs: Vec::new(), limit: 2000, skip: 0, path: None, follow: false, grep: None, author: None }
+        LogQuery { revs: Vec::new(), limit: 2000, skip: 0, path: None, follow: false, grep: None, author: None, exclude: Vec::new() }
     }
 }
 
@@ -111,6 +114,13 @@ impl Repo {
         if q.revs.is_empty() {
             if !self.has_any_ref() {
                 return Ok(Vec::new());
+            }
+            for x in &q.exclude {
+                let x = crate::check_name("ref", x)?;
+                if !x.starts_with("refs/") {
+                    return Err(crate::GitError::Arg(format!("`{x}` is not a full ref name")));
+                }
+                args.push(format!("--exclude={x}"));
             }
             args.extend(["--exclude=refs/stash".into(), "--all".into()]);
         } else {

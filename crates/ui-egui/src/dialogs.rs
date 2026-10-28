@@ -481,6 +481,16 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 }
             });
             ui.add_space(6.0);
+            ui.label(RichText::new("ZOOM").small().strong());
+            let mut z = app.prefs.zoom * 100.0;
+            if ui
+                .add(egui::Slider::new(&mut z, 50.0..=300.0).step_by(5.0).suffix("%"))
+                .on_hover_text(util::shortcut_label("Mod+=") + " / " + &util::shortcut_label("Mod+-"))
+                .changed()
+            {
+                app.prefs.zoom = z / 100.0;
+            }
+            ui.add_space(6.0);
             ui.label(RichText::new("DIFF CONTEXT LINES").small().strong());
             let mut c = app.prefs.context_lines;
             if ui.add(egui::Slider::new(&mut c, 0..=20)).changed() {

@@ -13,7 +13,9 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
 4. ~~Diff quality~~ — landed: `view.ignoreWhitespace` (`-w`), `view.wordDiff` (word-level LCS between a
    removed line and the added line replacing it), `view.syntax` (GitCraft's own per-line highlighter,
    `crates/ui-egui/src/highlight.rs`), image diffs, `file.content`. Next: multi-line comment state.
-5. **Graph controls** — `graph.solo`, `graph.hide`, `graph.columns`, `diff.compare` (two selected commits).
+5. ~~Graph controls~~ — landed: `graph.solo`, `graph.hide`, `graph.showAll`, `graph.refs` (remote branches and
+   tags on or off), `graph.columns`, `diff.compare` (two commits, or a commit and the working tree;
+   Mod-click a second commit), author highlighting, an overview strip, `ui.zoom`.
 6. **Identity and signing** — `config.identity` (user.name / email per repo), `commit.sign`,
    `commit.noVerify`, `commit.template`.
 7. **Submodules and worktrees** — `submodule.list`, `worktree.list`.

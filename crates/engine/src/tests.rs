@@ -502,3 +502,42 @@ fn whitespace_diffs_file_content_and_view_toggles() {
         assert!(s.run("file.content", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn solo_hide_columns_and_compare() {
+    let (_d, mut s) = session("eng-graphfilter");
+    assert_eq!(s.data.commits.len(), 3);
+    // feature has one commit main doesn't.
+    run(&mut s, "graph.hide", json!({"name": "feature"}));
+    assert_eq!(s.data.commits.len(), 2);
+    assert!(!s.data.labels.values().flatten().any(|&i| s.data.refs[i].name == "feature"));
+    run(&mut s, "graph.hide", json!({"name": "feature"}));
+    assert_eq!(s.data.commits.len(), 3);
+    assert!(s.run("graph.hide", &json!({"name": "main"})).is_err(), "the checked-out branch");
+    run(&mut s, "graph.solo", json!({"name": "main"}));
+    assert_eq!(s.data.commits.len(), 2);
+    run(&mut s, "graph.solo", json!({"name": "feature", "add": true}));
+    assert_eq!(s.data.commits.len(), 3);
+    run(&mut s, "graph.showAll", json!({}));
+    assert!(s.view.solo.is_empty());
+    run(&mut s, "graph.refs", json!({"tags": false}));
+    assert!(!s.data.labels.values().flatten().any(|&i| s.data.refs[i].kind == gitcraft_git::RefKind::Tag));
+    run(&mut s, "graph.refs", json!({"tags": true}));
+    assert_eq!(run(&mut s, "graph.columns", json!({"sha": false}))["columns"]["sha"], json!(false));
+    assert!(s.run("graph.solo", &json!({"name": "nope"})).is_err());
+    // Compare two commits, then a commit with the work tree.
+    let r = run(&mut s, "diff.compare", json!({"from": "v0.1.0", "to": "feature"}));
+    assert_eq!(r["files"][0]["path"], json!("src/lib.rs"));
+    run(&mut s, "file.select", json!({"path": "src/lib.rs", "area": "compare"}));
+    assert_eq!(s.selected_diff().unwrap().unwrap().added(), 3);
+    write(s.repo().unwrap(), "README.md", "changed\n").unwrap();
+    let r = run(&mut s, "diff.compare", json!({"from": "HEAD"}));
+    assert_eq!(r["files"][0]["path"], json!("README.md"));
+    assert!(s.sel.file.is_none());
+    run(&mut s, "file.select", json!({"path": "README.md", "area": "compare"}));
+    assert_eq!(s.selected_diff().unwrap().unwrap().added(), 1);
+    run(&mut s, "diff.compareClear", json!({}));
+    assert!(s.sel.file.is_none() && s.view.compare.is_none());
+    assert!(s.run("diff.compare", &json!({"from": "HEAD", "to": "HEAD"})).is_err());
+    assert!(s.run("file.select", &json!({"path": "x", "area": "compare"})).is_err());
+}

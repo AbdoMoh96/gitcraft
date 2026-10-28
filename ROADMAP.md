@@ -13,6 +13,14 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M4.** Graph controls: Solo and Hide a branch (`graph.solo`, `graph.hide`, from a
+  branch's menu; the header shows the filter with Show all), remote branches and tags on or off and
+  the Branch / Author / Date / Commit columns (right-click the graph header: `graph.refs`,
+  `graph.columns`), Compare (`diff.compare`: Mod-click a second commit, or Compare › With the Working
+  Tree / HEAD / the Selected Commit; the commit panel lists the files, a click opens the diff),
+  Highlight Commits by an author, an overview strip of the history at the graph's right edge
+  (branch tips, HEAD, search hits, the visible window; click to jump), and zoom (`ui.zoom`,
+  Preferences and Mod +/-, remembered).
 - **2026-10-28 — M4.** Diff quality: View › Ignore whitespace (`view.ignoreWhitespace`, `git diff -w`;
   staging is disabled while it hides changes), Highlight changed words (`view.wordDiff`: the words
   that differ between a removed line and the added line that replaced it), Syntax colours

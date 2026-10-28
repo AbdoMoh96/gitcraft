@@ -65,6 +65,8 @@ pub struct Prefs {
     pub active_tab: usize,
     /// Warn in the toolbar when merging the upstream or the target branch would conflict.
     pub conflict_check: bool,
+    /// Interface zoom (1.0 = 100%).
+    pub zoom: f32,
 }
 
 impl Default for Prefs {
@@ -80,6 +82,7 @@ impl Default for Prefs {
             tabs: Vec::new(),
             active_tab: 0,
             conflict_check: true,
+            zoom: 1.0,
         }
     }
 }
@@ -169,6 +172,10 @@ pub struct GitApp {
     pub conflict_alert: conflict_alert::ConflictAlert,
     /// Changed words of the diff on screen: (path, area, generation, context, whitespace) → cache.
     pub words: ((String, String, u64, u32, bool), diff_view::WordCache),
+    /// The graph's overview marks: (generation, search) → marks.
+    pub minimap: Option<((u64, String), graph_view::MinimapMarks)>,
+    /// The zoom applied last frame (to notice egui's own zoom keys).
+    zoom_seen: f32,
     /// The image diff on screen: key, old and new pictures.
     pub images: Option<(String, Option<egui::TextureHandle>, Option<egui::TextureHandle>)>,
 }
@@ -220,6 +227,8 @@ impl GitApp {
             tabs: tabs::Tabs::default(),
             conflict_alert: conflict_alert::ConflictAlert::default(),
             words: Default::default(),
+            zoom_seen: 1.0,
+            minimap: None,
             images: None,
         }
     }
@@ -560,6 +569,23 @@ impl GitApp {
                 Ok(r)
             }
             "ui.tabs" => self.tabs_command(v),
+            "ui.zoom" => {
+                let cur = self.prefs.zoom;
+                let z = if v.get("reset").and_then(Value::as_bool).unwrap_or(false) {
+                    1.0
+                } else if let Some(x) = v.get("value").and_then(Value::as_f64) {
+                    x as f32
+                } else if let Some(by) = v.get("by").and_then(Value::as_f64) {
+                    cur + by as f32
+                } else {
+                    return Err("`value`, `by` or `reset` is required".into());
+                };
+                if !z.is_finite() {
+                    return Err("`value` is a number".into());
+                }
+                self.prefs.zoom = (z * 20.0).round().clamp(10.0, 60.0) / 20.0;
+                Ok(json!({"value": self.prefs.zoom}))
+            }
             "ui.filterRefs" => {
                 self.ref_filter = s("text").unwrap_or("").chars().take(200).collect();
                 Ok(json!({"text": self.ref_filter}))
@@ -595,6 +621,14 @@ impl GitApp {
     /// Per-frame work before layout: background jobs, control requests, shortcuts, outside changes.
     pub fn logic(&mut self, ctx: &egui::Context) {
         ctx.set_theme(self.prefs.appearance.preference());
+        // egui's own zoom keys (Mod +, Mod -, Mod 0) change it too: keep the preference in step.
+        let z = ctx.zoom_factor();
+        if (z - self.zoom_seen).abs() > f32::EPSILON {
+            self.prefs.zoom = z;
+        } else if (z - self.prefs.zoom).abs() > f32::EPSILON && self.prefs.zoom.is_finite() {
+            ctx.set_zoom_factor(self.prefs.zoom.clamp(0.5, 3.0));
+        }
+        self.zoom_seen = ctx.zoom_factor();
         self.poll_jobs();
         self.poll_control(ctx);
         self.poll_conflict_alert();

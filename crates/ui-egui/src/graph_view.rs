@@ -6,7 +6,7 @@ use egui::epaint::CubicBezierShape;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use gitcraft_engine::git::{Commit, RefKind};
 use gitcraft_engine::graph::Seg;
-use gitcraft_engine::{RepoData, Selected};
+use gitcraft_engine::{Columns, RepoData, Selected};
 use serde_json::json;
 
 use crate::avatars::Avatars;
@@ -65,20 +65,22 @@ struct Cols {
     sha: Rect,
 }
 
-fn columns(row: Rect, graph_w: f32) -> Cols {
+fn columns(row: Rect, graph_w: f32, shown: Columns) -> Cols {
     let mut x = row.left();
     let mut take = |w: f32| {
         let r = Rect::from_min_size(pos2(x, row.top()), vec2(w, row.height()));
         x += w;
         r
     };
-    let refs = take(REFS_W);
+    let w = |on: bool, w: f32| if on { w } else { 0.0 };
+    let (refs_w, author_w, date_w, sha_w) = (w(shown.refs, REFS_W), w(shown.author, AUTHOR_W), w(shown.date, DATE_W), w(shown.sha, SHA_W));
+    let refs = take(refs_w);
     let graph = take(graph_w);
-    let msg_w = (row.width() - REFS_W - graph_w - AUTHOR_W - DATE_W - SHA_W).max(120.0);
+    let msg_w = (row.width() - refs_w - graph_w - author_w - date_w - sha_w).max(120.0);
     let msg = take(msg_w);
-    let author = take(AUTHOR_W);
-    let date = take(DATE_W);
-    let sha = take(SHA_W);
+    let author = take(author_w);
+    let date = take(date_w);
+    let sha = take(sha_w);
     Cols { refs, graph, msg, author, date, sha }
 }
 
@@ -100,9 +102,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     let n = d.commits.len() + usize::from(wip) + usize::from(d.more);
 
     // Header.
-    let (hdr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
+    let shown = app.session.view.columns;
+    let (hdr, hdr_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
     ui.painter().rect_filled(hdr, 0.0, t.chrome);
-    let c = columns(hdr, graph_w);
+    let c = columns(hdr, graph_w, shown);
     let hf = FontId::proportional(11.0);
     let title = if let Some(p) = &app.session.view.history { format!("HISTORY OF {p}") } else { "COMMIT MESSAGE".into() };
     for (r, s) in [(c.refs, "BRANCH / TAG"), (c.graph, "GRAPH"), (c.msg, title.as_str()), (c.author, "AUTHOR"), (c.date, "DATE"), (c.sha, "COMMIT")] {
@@ -113,7 +116,56 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         if ui.put(b, egui::Button::new(egui::RichText::new("Show all commits").small())).clicked() {
             let _ = app.run("view.historyClear", json!({}));
         }
+    } else if app.disabled("graph.showAll").is_none() {
+        let v = &app.session.view;
+        let what = if !v.solo.is_empty() {
+            format!(
+                "Solo: {}",
+                v.solo
+                    .iter()
+                    .map(|f| ["refs/heads/", "refs/remotes/", "refs/tags/"].iter().find_map(|p| f.strip_prefix(p)).unwrap_or(f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else if !v.hidden.is_empty() {
+            format!("{} hidden", v.hidden.len())
+        } else {
+            "Filtered".to_string()
+        };
+        let b = Rect::from_min_size(pos2(c.msg.right() - 250.0, hdr.top() + 2.0), vec2(246.0, 20.0));
+        if ui
+            .put(b, egui::Button::new(egui::RichText::new(format!("{what} · Show all")).small().color(t.accent)))
+            .on_hover_text("Show every branch again")
+            .clicked()
+        {
+            let _ = app.run("graph.showAll", json!({}));
+        }
     }
+    // Right-click the header: which columns and refs show.
+    hdr_resp.context_menu(|ui| {
+        let v = app.session.view.clone();
+        ui.label(egui::RichText::new("Columns").small().weak());
+        for (k, on, label) in [
+            ("refs", v.columns.refs, "Branch / Tag"),
+            ("author", v.columns.author, "Author"),
+            ("date", v.columns.date, "Date"),
+            ("sha", v.columns.sha, "Commit ID"),
+        ] {
+            let mut x = on;
+            if ui.checkbox(&mut x, label).changed() {
+                let _ = app.run("graph.columns", json!({ k: x }));
+            }
+        }
+        ui.separator();
+        let mut r = v.show_remotes;
+        if ui.checkbox(&mut r, "Remote branches").changed() {
+            let _ = app.run("graph.refs", json!({"remotes": r}));
+        }
+        let mut tg = v.show_tags;
+        if ui.checkbox(&mut tg, "Tags").changed() {
+            let _ = app.run("graph.refs", json!({"tags": tg}));
+        }
+    });
 
     let selected_row = match &app.session.sel.row {
         Selected::Wip => Some(0),
@@ -123,6 +175,11 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]).id_salt("graph_scroll");
     let view_h = ui.available_height();
     let offset_key = egui::Id::new("graph_offset");
+    let jump_key = egui::Id::new("graph_jump");
+    if let Some(y) = ui.ctx().data_mut(|m| m.remove_temp::<f32>(jump_key)) {
+        area = area.vertical_scroll_offset(y.max(0.0));
+    }
+    let list_rect = ui.available_rect_before_wrap();
     if app.scroll_to_selection {
         app.scroll_to_selection = false;
         if let Some(r) = selected_row {
@@ -146,7 +203,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         let head_lane = head_row.and_then(|r| d.graph.rows.get(r)).map(|r| r.lane).unwrap_or(0);
         for i in range {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-            let cols = columns(rect, graph_w);
+            let cols = columns(rect, graph_w, shown);
             let p = ui.painter().clone();
             let selected = selected_row == Some(i);
             if selected {
@@ -235,7 +292,15 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             text_in(&p, cols.date, &util::relative_time(commit.author.time, now), FontId::proportional(12.0), fade(t.dim));
             text_in(&p, cols.sha, commit.short(), FontId::monospace(11.5), fade(t.dim));
             if resp.clicked() {
-                actions.push(Action::Run("graph.select", json!({"oid": commit.oid})));
+                let compare_with = ui.input(|i| i.modifiers.command).then(|| match &app.session.sel.row {
+                    Selected::Commit(o) if *o != commit.oid => Some(o.clone()),
+                    _ => None,
+                });
+                match compare_with.flatten() {
+                    // Mod-click a second commit: compare it with the selected one.
+                    Some(from) => actions.push(Action::Run("diff.compare", json!({"from": from, "to": commit.oid}))),
+                    None => actions.push(Action::Run("graph.select", json!({"oid": commit.oid}))),
+                }
             }
             if resp.double_clicked()
                 && let Some(t) = checkout_target(&labels(d, &commit.oid))
@@ -258,6 +323,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     });
     ui.spacing_mut().item_spacing.y = spacing;
     ui.ctx().data_mut(|m| m.insert_temp(offset_key, out.state.offset.y));
+    minimap(app, ui, list_rect, n, wip, out.state.offset.y, view_h, jump_key);
     if let Some(dr) = &dragging {
         drag_ghost(ui.ctx(), &dr.name);
     }
@@ -266,6 +332,73 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     }
     drop_menu(app, ui.ctx());
     label_popup(app, ui.ctx());
+}
+
+/// Marks on the overview strip: (row, colour kind) — 0 branch tip, 1 search hit, 2 HEAD.
+pub type MinimapMarks = Vec<(usize, u8)>;
+
+/// A thin overview of the whole loaded history at the graph's right edge: branch tips, search
+/// hits, HEAD and the selection, with the visible window; a click jumps there.
+fn minimap(app: &mut GitApp, ui: &mut egui::Ui, area: Rect, rows: usize, wip: bool, offset: f32, view_h: f32, jump_key: egui::Id) {
+    if rows < 2 || (rows as f32) * ROW_H <= view_h {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let key = (app.session.generation(), app.session.view.search.clone());
+    if app.minimap.as_ref().map(|(k, _)| k) != Some(&key) {
+        let d = &app.session.data;
+        let q = app.session.view.search.to_lowercase();
+        let mut marks: MinimapMarks = Vec::new();
+        for (i, c) in d.commits.iter().enumerate() {
+            let row = i + usize::from(wip);
+            if d.status.head.as_deref() == Some(c.oid.as_str()) {
+                marks.push((row, 2));
+            } else if !q.is_empty() && gitcraft_engine::cmd::view::matches(c, &q) {
+                marks.push((row, 1));
+            } else if d.labels.get(&c.oid).is_some_and(|ix| ix.iter().any(|&j| d.refs.get(j).is_some_and(|r| r.kind == RefKind::Local))) {
+                marks.push((row, 0));
+            }
+        }
+        app.minimap = Some((key, marks));
+    }
+    let strip = Rect::from_min_max(pos2(area.right() - 22.0, area.top() + 2.0), pos2(area.right() - 14.0, area.bottom() - 2.0));
+    let p = ui.painter();
+    p.rect_filled(strip, 3.0, t.chrome.gamma_multiply(0.8));
+    let y_of = |row: usize| strip.top() + strip.height() * (row as f32 + 0.5) / rows as f32;
+    if let Some((_, marks)) = &app.minimap {
+        for &(row, kind) in marks {
+            let c = match kind {
+                2 => t.accent,
+                1 => t.warning,
+                _ => t.dim,
+            };
+            let y = y_of(row);
+            p.line_segment([pos2(strip.left() + 1.0, y), pos2(strip.right() - 1.0, y)], Stroke::new(if kind == 0 { 1.0 } else { 2.0 }, c));
+        }
+    }
+    let selected = match &app.session.sel.row {
+        Selected::Wip => Some(0),
+        Selected::Commit(o) => app.session.data.row_of.get(o).map(|&i| i + usize::from(wip)),
+        Selected::None => None,
+    };
+    if let Some(r) = selected {
+        p.circle_filled(pos2(strip.center().x, y_of(r)), 2.5, t.text);
+    }
+    let total = rows as f32 * ROW_H;
+    let win = Rect::from_min_max(
+        pos2(strip.left() - 1.0, strip.top() + strip.height() * (offset / total).clamp(0.0, 1.0)),
+        pos2(strip.right() + 1.0, strip.top() + strip.height() * ((offset + view_h) / total).clamp(0.0, 1.0)),
+    );
+    p.rect_stroke(win, 2.0, Stroke::new(1.0, t.accent.gamma_multiply(0.7)), egui::StrokeKind::Outside);
+    let resp =
+        ui.interact(strip.expand2(vec2(3.0, 0.0)), egui::Id::new("graph_minimap"), Sense::click_and_drag()).on_hover_text("Overview: click to jump");
+    if (resp.clicked() || resp.dragged())
+        && let Some(pos) = resp.interact_pointer_pos()
+    {
+        let frac = ((pos.y - strip.top()) / strip.height()).clamp(0.0, 1.0);
+        ui.ctx().data_mut(|m| m.insert_temp(jump_key, frac * total - view_h / 2.0));
+        ui.ctx().request_repaint();
+    }
 }
 
 /// The list of every label on a commit, open while the pointer is on its pill or the list.
@@ -714,6 +847,14 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
                     actions.push(Action::Run("rebase.onto", json!({"ref": r.name})));
                     ui.close();
                 }
+                if ui.button(format!("Solo {}", r.name)).on_hover_text("Show only this branch's history").clicked() {
+                    actions.push(Action::Run("graph.solo", json!({"name": r.name})));
+                    ui.close();
+                }
+                if !r.head && ui.button(format!("Hide {}", r.name)).on_hover_text("Leave this branch out of the graph").clicked() {
+                    actions.push(Action::Run("graph.hide", json!({"name": r.name})));
+                    ui.close();
+                }
                 if ui.button("Copy Branch Name").clicked() {
                     actions.push(Action::Copy(r.name.clone()));
                     ui.close();
@@ -799,6 +940,28 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
             ui.close();
         }
     });
+    ui.menu_button("Compare", |ui| {
+        if ui.button("With the Working Tree").clicked() {
+            actions.push(Action::Run("diff.compare", json!({"from": c.oid})));
+            ui.close();
+        }
+        if d.status.head.as_deref() != Some(c.oid.as_str()) && ui.button("With HEAD").clicked() {
+            actions.push(Action::Run("diff.compare", json!({"from": c.oid, "to": "HEAD"})));
+            ui.close();
+        }
+        if let Selected::Commit(o) = &app.session.sel.row
+            && *o != c.oid
+            && ui.button(format!("With the Selected Commit ({})", o.get(..7).unwrap_or(o))).clicked()
+        {
+            actions.push(Action::Run("diff.compare", json!({"from": o, "to": c.oid})));
+            ui.close();
+        }
+        ui.label(egui::RichText::new(format!("Tip: {}-click a second commit", util::shortcut_label("Mod"))).small().weak());
+    });
+    if ui.button(format!("Highlight Commits by {}", c.author.name)).clicked() {
+        actions.push(Action::Run("view.search", json!({"text": c.author.email})));
+        ui.close();
+    }
     ui.separator();
     if ui.button("Copy Commit SHA").clicked() {
         actions.push(Action::Copy(c.oid.clone()));

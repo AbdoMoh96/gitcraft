@@ -17,7 +17,7 @@ use serde_json::Value;
 
 pub use gitcraft_git as git;
 pub use gitcraft_graph as graph;
-pub use session::{Area, CommitDraft, DiffMode, FileSel, RepoData, Selected, Selection, Session, ViewState};
+pub use session::{Area, Columns, CommitDraft, DiffMode, FileSel, RepoData, Selected, Selection, Session, ViewState};
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CmdError {

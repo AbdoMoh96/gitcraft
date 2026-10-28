@@ -54,8 +54,14 @@ fn select_file(s: &mut Session, v: &Value) -> CmdResult {
         _ => None,
     });
     let area_name = p::str(v, "area").unwrap_or(if oid.is_some() && p::str(v, "oid").is_some() { "commit" } else { "unstaged" });
-    let area = Area::parse(area_name, oid.as_deref())
-        .ok_or_else(|| CmdError::Params("`area` is unstaged, staged or commit (with a selected commit or `oid`)".into()))?;
+    let area = if area_name.trim().eq_ignore_ascii_case("compare") {
+        let (from, to) = s.view.compare.clone().ok_or_else(|| CmdError::Params("nothing is being compared (diff.compare)".into()))?;
+        s.sel.file = Some(FileSel { path, area: Area::Compare { from, to } });
+        return Ok(json!({"selection": s.sel}));
+    } else {
+        Area::parse(area_name, oid.as_deref())
+            .ok_or_else(|| CmdError::Params("`area` is unstaged, staged, commit (with a selected commit or `oid`) or compare".into()))?
+    };
     if let Area::Commit(o) = &area {
         s.sel.row = Selected::Commit(o.clone());
     } else {
@@ -67,6 +73,75 @@ fn select_file(s: &mut Session, v: &Value) -> CmdResult {
 
 fn toggle(cur: bool, v: &Value) -> bool {
     p::bool(v, "value").unwrap_or(!cur)
+}
+
+/// A ref's full name from `name` (`main`, `origin/main`, `v1`, or `refs/…`).
+fn full_ref(s: &Session, v: &Value) -> Result<String, CmdError> {
+    let n = p::req_str(v, "name")?.trim();
+    s.data
+        .refs
+        .iter()
+        .find(|r| r.full == n)
+        .or_else(|| s.data.refs.iter().find(|r| r.name == n))
+        .map(|r| r.full.clone())
+        .ok_or_else(|| CmdError::Params(format!("no branch or tag `{n}`")))
+}
+
+fn graph_filter_json(s: &Session) -> Value {
+    json!({"solo": s.view.solo, "hidden": s.view.hidden, "showRemotes": s.view.show_remotes, "showTags": s.view.show_tags, "commits": s.data.commits.len()})
+}
+
+/// Show only the history of the given refs (`add` keeps the ones already soloed); again to stop.
+fn solo(s: &mut Session, v: &Value) -> CmdResult {
+    let full = full_ref(s, v)?;
+    let on = p::bool(v, "value").unwrap_or(!s.view.solo.contains(&full));
+    if !p::bool(v, "add").unwrap_or(false) && on {
+        s.view.solo.clear();
+    }
+    s.view.solo.retain(|f| *f != full);
+    if on {
+        s.view.solo.push(full);
+        s.view.hidden.clear();
+    }
+    s.refresh()?;
+    Ok(graph_filter_json(s))
+}
+
+fn hide(s: &mut Session, v: &Value) -> CmdResult {
+    let full = full_ref(s, v)?;
+    let on = p::bool(v, "value").unwrap_or(!s.view.hidden.contains(&full));
+    s.view.hidden.retain(|f| *f != full);
+    if on {
+        if s.data.head_ref().is_some_and(|r| r.full == full) {
+            return Err(CmdError::Params("the checked-out branch can't be hidden".into()));
+        }
+        s.view.hidden.push(full);
+        s.view.solo.clear();
+    }
+    s.refresh()?;
+    Ok(graph_filter_json(s))
+}
+
+/// Compare two revisions: the files that differ, opened in the commit panel. `to` defaults to the
+/// work tree.
+fn compare(s: &mut Session, v: &Value) -> CmdResult {
+    let from_name = match p::str(v, "from").filter(|x| !x.trim().is_empty()) {
+        Some(x) => x.trim().to_string(),
+        None => super::target_commit(s, v)?,
+    };
+    let repo = s.repo()?.clone();
+    let from = repo.resolve(&from_name).ok_or_else(|| CmdError::Params(format!("no commit `{from_name}`")))?;
+    let to = match p::str(v, "to").map(str::trim).filter(|x| !x.is_empty() && !x.eq_ignore_ascii_case("worktree") && !x.eq_ignore_ascii_case("wip")) {
+        Some(t) => Some(repo.resolve(t).ok_or_else(|| CmdError::Params(format!("no commit `{t}`")))?),
+        None => None,
+    };
+    if Some(&from) == to.as_ref() {
+        return Err(CmdError::Params("compare two different commits".into()));
+    }
+    let files = repo.range_files(&from, to.as_deref())?;
+    s.view.compare = Some((from.clone(), to.clone()));
+    s.sel.file = None;
+    Ok(json!({"from": from, "to": to, "files": files}))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -114,6 +189,65 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"value": number (0–100)}"#)
         .pure(),
+        CommandSpec::new("graph.solo", "Solo Branch", "Graph", solo)
+            .params(r#"{"name": branch or tag, "value"?: bool, "add"?: bool (keep other soloed refs)}"#)
+            .pure()
+            .when(super::need_commits),
+        CommandSpec::new("graph.hide", "Hide Branch", "Graph", hide)
+            .params(r#"{"name": branch or tag, "value"?: bool}"#)
+            .pure()
+            .when(super::need_commits),
+        CommandSpec::new("graph.showAll", "Show All Branches", "Graph", |s, _| {
+            s.view.solo.clear();
+            s.view.hidden.clear();
+            s.view.show_remotes = true;
+            s.view.show_tags = true;
+            s.refresh()?;
+            Ok(graph_filter_json(s))
+        })
+        .pure()
+        .when(|s| {
+            need_repo(s).or_else(|| {
+                (s.view.solo.is_empty() && s.view.hidden.is_empty() && s.view.show_remotes && s.view.show_tags).then_some("every branch is shown")
+            })
+        }),
+        CommandSpec::new("graph.refs", "Show Remote Branches and Tags", "Graph", |s, v| {
+            if let Some(b) = p::bool(v, "remotes") {
+                s.view.show_remotes = b;
+            }
+            if let Some(b) = p::bool(v, "tags") {
+                s.view.show_tags = b;
+            }
+            s.refresh()?;
+            Ok(graph_filter_json(s))
+        })
+        .params(r#"{"remotes"?: bool, "tags"?: bool}"#)
+        .pure()
+        .when(need_repo),
+        CommandSpec::new("graph.columns", "Graph Columns", "Graph", |s, v| {
+            let c = &mut s.view.columns;
+            for (k, f) in [("refs", &mut c.refs), ("author", &mut c.author), ("date", &mut c.date), ("sha", &mut c.sha)] {
+                if let Some(b) = p::bool(v, k) {
+                    *f = b;
+                }
+            }
+            Ok(json!({"columns": s.view.columns}))
+        })
+        .params(r#"{"refs"?: bool, "author"?: bool, "date"?: bool, "sha"?: bool}"#)
+        .pure(),
+        CommandSpec::new("diff.compare", "Compare Commits", "Graph › Commit Menu", compare)
+            .params(r#"{"from"?: commit (default: selected), "to"?: commit or "worktree" (default)}"#)
+            .pure()
+            .when(super::need_commits),
+        CommandSpec::new("diff.compareClear", "Stop Comparing", "Commit Panel", |s, _| {
+            s.view.compare = None;
+            if matches!(s.sel.file.as_ref().map(|f| &f.area), Some(Area::Compare { .. })) {
+                s.sel.file = None;
+            }
+            Ok(json!({}))
+        })
+        .pure()
+        .when(|s| need_repo(s).or_else(|| s.view.compare.is_none().then_some("nothing is being compared"))),
         CommandSpec::new("view.ignoreWhitespace", "Ignore Whitespace", "Diff View", |s, v| {
             s.view.ignore_whitespace = toggle(s.view.ignore_whitespace, v);
             Ok(json!({"value": s.view.ignore_whitespace}))

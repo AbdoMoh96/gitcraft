@@ -367,6 +367,33 @@ impl Repo {
         Ok(parse_name_status(&o.stdout))
     }
 
+    /// The files that differ between two revisions; `to: None` compares with the work tree.
+    pub fn range_files(&self, from: &str, to: Option<&str>) -> Result<Vec<CommitFile>> {
+        let from = crate::check_name("revision", from)?;
+        let mut args = vec!["diff", "--name-status", "-z", "-M", "--no-ext-diff", from];
+        if let Some(t) = to {
+            args.push(crate::check_name("revision", t)?);
+        }
+        args.push("--");
+        Ok(parse_name_status(&self.run_ok(&args)?.stdout))
+    }
+
+    /// One file's diff between two revisions; `to: None` compares with the work tree.
+    pub fn diff_range_file(&self, from: &str, to: Option<&str>, path: &str, opts: DiffOpts) -> Result<FileDiff> {
+        let from = crate::check_name("revision", from)?;
+        let path = crate::check_path(path)?;
+        let extra = opts.args();
+        let mut args = vec!["diff"];
+        args.extend(extra.iter().map(String::as_str));
+        args.extend(DIFF_OPTS);
+        args.push(from);
+        if let Some(t) = to {
+            args.push(crate::check_name("revision", t)?);
+        }
+        args.extend(["--", path]);
+        Ok(first_or_empty(parse(&self.run_paths(&args)?.stdout), path))
+    }
+
     /// Diff between any two revisions, every file.
     pub fn diff_revs(&self, from: &str, to: &str, context: u32) -> Result<Vec<FileDiff>> {
         let (from, to) = (crate::check_name("revision", from)?, crate::check_name("revision", to)?);

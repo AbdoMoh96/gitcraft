@@ -56,6 +56,9 @@ Graph|Commit Menu|Edit Commit Message|commit.reword
 Graph|Commit Menu|Squash Commits|commit.squash
 Graph|Commit Menu|Drop Commit|commit.drop
 Graph|Commit Menu|Compare Commits|diff.compare
+Graph|Commit Menu|Move Commit Up and Down|commit.moveUp
+Graph|Navigation|Show or Hide Remote Branches and Tags|graph.refs
+Graph|Navigation|Highlight Commits by Author|view.search
 Graph|Drag and Drop|Drag a Branch onto a Branch (merge, rebase, fast-forward)|branch.dropOnto
 Branches|Menu|Checkout Branch|branch.checkout
 Branches|Menu|Merge into Current Branch|merge.into
@@ -112,6 +115,9 @@ Diff View|Changes|Edit File|file.edit
 Diff View|Changes|Ignore Whitespace|view.ignoreWhitespace
 Diff View|Changes|Word Highlighting|view.wordDiff
 Diff View|Changes|Syntax Highlighting|view.syntax
+Diff View|Changes|Image Diff|file.content
+Diff View|Changes|View File at a Commit|file.content
+Diff View|Changes|Compare a Commit with the Working Tree|diff.compare
 Merge|Conflicts|Conflict Detection|repo.status
 Merge|Conflicts|Conflict Prevention|conflict.predict
 Merge|Conflicts|Take Ours|conflict.takeOurs
@@ -133,6 +139,7 @@ Tools|General|Create Patch|patch.create
 Tools|General|Apply Patch|patch.apply
 Settings|Preferences|Interface Theme|ui.theme
 Settings|Preferences|Preferences|ui.preferences
+Settings|Preferences|Zoom|ui.zoom
 Integrations|Hosting|Hosting Service Accounts|integrations.connect
 Integrations|Hosting|Cloud Patches|cloudpatch.create
 Integrations|Hosting|Launchpad|launchpad.open
@@ -151,6 +158,7 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.shortcuts",
     "ui.theme",
     "ui.preferences",
+    "ui.zoom",
 ];
 
 pub struct Entry {
@@ -225,7 +233,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 98;
+    const FLOOR: usize = 109;
 
     #[test]
     fn parity_floor() {

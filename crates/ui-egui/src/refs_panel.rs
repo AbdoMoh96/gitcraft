@@ -281,6 +281,24 @@ pub fn branch_menu(app: &mut GitApp, ui: &mut egui::Ui, r: &Ref) {
         ui.close();
     }
     ui.separator();
+    let soloed = app.session.view.solo.contains(&r.full);
+    if ui
+        .button(if soloed { format!("Stop Soloing {}", r.name) } else { format!("Solo {}", r.name) })
+        .on_hover_text("Show only this branch's history")
+        .clicked()
+    {
+        let _ = app.run("graph.solo", json!({"name": r.full}));
+        ui.close();
+    }
+    let hidden = app.session.view.hidden.contains(&r.full);
+    if !r.head && ui.button(if hidden { format!("Show {}", r.name) } else { format!("Hide {}", r.name) }).clicked() {
+        let _ = app.run("graph.hide", json!({"name": r.full}));
+        ui.close();
+    }
+    if ui.button(format!("Compare {} with {current}", r.name)).clicked() {
+        let _ = app.run("diff.compare", json!({"from": "HEAD", "to": r.name}));
+        ui.close();
+    }
     if ui.button("Copy Branch Name").clicked() {
         app.copy(r.name.clone());
         ui.close();

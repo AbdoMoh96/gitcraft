@@ -20,9 +20,14 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         .size_range(280.0..=720.0)
         .resizable(true)
         .frame(Frame::NONE.fill(t.panel).inner_margin(Margin::same(10)).stroke(Stroke::new(1.0, t.border)))
-        .show(ui, |ui| match app.session.sel.row.clone() {
-            Selected::Commit(oid) => details(app, ui, &oid),
-            _ => wip(app, ui),
+        .show(ui, |ui| {
+            if let Some((from, to)) = app.session.view.compare.clone() {
+                return compare(app, ui, &from, to.as_deref());
+            }
+            match app.session.sel.row.clone() {
+                Selected::Commit(oid) => details(app, ui, &oid),
+                _ => wip(app, ui),
+            }
         });
 }
 
@@ -87,6 +92,84 @@ fn file_row(
     }
     let clicked = resp.clicked() && hit.is_none();
     (clicked, hit, resp.on_hover_text(path))
+}
+
+pub fn change_of(code: &str) -> Change {
+    match code {
+        "added" => Change::Added,
+        "deleted" => Change::Deleted,
+        "renamed" => Change::Renamed,
+        "copied" => Change::Copied,
+        "typeChanged" => Change::TypeChanged,
+        _ => Change::Modified,
+    }
+}
+
+/// Two revisions compared: the files that differ; a click opens a file's diff.
+fn compare(app: &mut GitApp, ui: &mut egui::Ui, from: &str, to: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let key = (format!("compare:{from}:{}", to.unwrap_or("worktree")), app.session.generation());
+    if app.details.as_ref().map(|(k, _)| k) != Some(&key) {
+        let r = app.session.repo().map_err(|e| e.to_string()).and_then(|repo| repo.range_files(from, to).map_err(|e| e.to_string()));
+        let r = r.map(|files| json!({"files": files}));
+        app.details = Some((key, r));
+    }
+    let mut run: Option<(&'static str, Value)> = None;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Comparing").strong());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if icons::button(ui, Icon::Close, "Stop comparing", None, 14.0).clicked() {
+                run = Some(("diff.compareClear", json!({})));
+            }
+        });
+    });
+    let name = |o: &str| -> String {
+        let labels: Vec<String> = app
+            .session
+            .data
+            .labels
+            .get(o)
+            .map(|ix| ix.iter().filter_map(|&i| app.session.data.refs.get(i)).map(|r| r.name.clone()).collect())
+            .unwrap_or_default();
+        let short = o.get(..7).unwrap_or(o).to_string();
+        if labels.is_empty() { short } else { format!("{short} ({})", labels.join(", ")) }
+    };
+    Frame::NONE.fill(t.bg).corner_radius(6).inner_margin(Margin::same(8)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(format!("from  {}", name(from))).monospace().color(t.removed));
+        ui.label(RichText::new(format!("to    {}", to.map(name).unwrap_or_else(|| "the working tree".into()))).monospace().color(t.added));
+    });
+    ui.add_space(6.0);
+    let Some((_, result)) = app.details.clone() else { return };
+    match result {
+        Err(e) => {
+            ui.label(RichText::new(e).color(t.danger));
+        }
+        Ok(v) => {
+            let files = v["files"].as_array().cloned().unwrap_or_default();
+            ui.label(RichText::new(format!("{} changed file{}", files.len(), if files.len() == 1 { "" } else { "s" })).strong());
+            let sel = app.session.sel.file.clone();
+            egui::ScrollArea::vertical().id_salt("compare_files").auto_shrink([false, false]).show(ui, |ui| {
+                for f in files {
+                    let path = f["path"].as_str().unwrap_or("").to_string();
+                    let selected = sel.as_ref().is_some_and(|x| x.path == path && matches!(x.area, Area::Compare { .. }));
+                    let (clicked, _, resp) = file_row(ui, &path, change_of(f["change"].as_str().unwrap_or("")), selected, false, &[]);
+                    if clicked {
+                        run = Some(("file.select", json!({"path": path, "area": "compare"})));
+                    }
+                    resp.context_menu(|ui| {
+                        if ui.button("Copy Path").clicked() {
+                            app.copy(path.clone());
+                            ui.close();
+                        }
+                    });
+                }
+            });
+        }
+    }
+    if let Some((id, p)) = run {
+        let _ = app.run(id, p);
+    }
 }
 
 fn section(ui: &mut egui::Ui, title: &str, count: usize, button: Option<(&str, Option<&'static str>)>) -> bool {
@@ -408,14 +491,7 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
         let sel = app.session.sel.file.clone();
         for f in files {
             let path = s(&f["path"]);
-            let change = match f["change"].as_str().unwrap_or("") {
-                "added" => Change::Added,
-                "deleted" => Change::Deleted,
-                "renamed" => Change::Renamed,
-                "copied" => Change::Copied,
-                "typeChanged" => Change::TypeChanged,
-                _ => Change::Modified,
-            };
+            let change = change_of(f["change"].as_str().unwrap_or(""));
             let selected = sel.as_ref().is_some_and(|x| x.path == path);
             let (clicked, _, resp) = file_row(ui, &path, change, selected, false, &[]);
             if clicked {

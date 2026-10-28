@@ -103,6 +103,9 @@ fn header(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(
                 Area::Unstaged => "Unstaged".to_string(),
                 Area::Staged => "Staged".to_string(),
                 Area::Commit(o) => format!("commit {}", o.get(..7).unwrap_or(o)),
+                Area::Compare { from, to } => {
+                    format!("{}..{}", from.get(..7).unwrap_or(from), to.as_deref().map(|t| t.get(..7).unwrap_or(t)).unwrap_or("working tree"))
+                }
             };
             ui.label(RichText::new(chip).small().color(t.dim));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -129,7 +132,7 @@ fn header(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(
                             *run = Some(("unstage.file", json!({"path": sel.path})));
                         }
                     }
-                    Area::Commit(_) => {}
+                    Area::Commit(_) | Area::Compare { .. } => {}
                 }
                 ui.separator();
                 if icons::button(ui, Icon::History, "File history", app.disabled("view.history"), 15.0).clicked() {
@@ -213,8 +216,8 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
     let rows = rows_for(d, split);
     let longest = d.hunks.iter().flat_map(|h| &h.lines).map(|l| l.text.chars().count()).max().unwrap_or(0).min(2000);
     let ctx_used = context_used(app);
-    let editable = !matches!(sel.area, Area::Commit(_)) && !d.truncated && !app.session.view.ignore_whitespace;
-    if app.session.view.ignore_whitespace && !matches!(sel.area, Area::Commit(_)) {
+    let editable = matches!(sel.area, Area::Unstaged | Area::Staged) && !d.truncated && !app.session.view.ignore_whitespace;
+    if app.session.view.ignore_whitespace && matches!(sel.area, Area::Unstaged | Area::Staged) {
         Frame::NONE.fill(t.hunk_bg).inner_margin(6).show(ui, |ui| {
             ui.label(RichText::new("Whitespace changes are hidden: turn them back on (View) to stage hunks or lines.").small().color(t.dim));
         });
@@ -295,7 +298,7 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
                                 });
                             }
                         }
-                        Area::Commit(_) => {}
+                        Area::Commit(_) | Area::Compare { .. } => {}
                     }
                 }
                 Row::Line(hi, li) => {
@@ -531,6 +534,7 @@ fn blame(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(&
     if app.blame.as_ref().map(|(k, _)| k) != Some(&key) {
         let rev = match &sel.area {
             Area::Commit(o) => Some(o.as_str()),
+            Area::Compare { to: Some(o), .. } => Some(o.as_str()),
             _ => None,
         };
         let r = match app.session.repo() {

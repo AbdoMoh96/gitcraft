@@ -55,6 +55,11 @@ pub enum Area {
     Staged,
     /// A file of a commit.
     Commit(String),
+    /// A file compared between two revisions (`to: None`: the work tree).
+    Compare {
+        from: String,
+        to: Option<String>,
+    },
 }
 
 impl Area {
@@ -114,6 +119,32 @@ pub struct ViewState {
     pub word_diff: bool,
     /// Colour code by language.
     pub syntax: bool,
+    /// Only these refs' history (full names); empty: every ref.
+    pub solo: Vec<String>,
+    /// Refs whose history is left out (full names).
+    pub hidden: Vec<String>,
+    /// Remote branches and tags in the graph.
+    pub show_remotes: bool,
+    pub show_tags: bool,
+    /// The graph's columns.
+    pub columns: Columns,
+    /// Two revisions being compared (`to: None`: the work tree).
+    pub compare: Option<(String, Option<String>)>,
+}
+
+/// Which of the graph's optional columns show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Columns {
+    pub refs: bool,
+    pub author: bool,
+    pub date: bool,
+    pub sha: bool,
+}
+
+impl Default for Columns {
+    fn default() -> Self {
+        Columns { refs: true, author: true, date: true, sha: true }
+    }
 }
 
 impl Default for ViewState {
@@ -129,6 +160,12 @@ impl Default for ViewState {
             ignore_whitespace: false,
             word_diff: true,
             syntax: true,
+            solo: Vec::new(),
+            hidden: Vec::new(),
+            show_remotes: true,
+            show_tags: true,
+            columns: Columns::default(),
+            compare: None,
         }
     }
 }
@@ -273,6 +310,9 @@ impl Session {
         self.draft = CommitDraft::default();
         self.view.history = None;
         self.view.search.clear();
+        self.view.solo.clear();
+        self.view.hidden.clear();
+        self.view.compare = None;
         self.undo.clear();
         self.redo.clear();
         self.refresh()?;
@@ -306,13 +346,19 @@ impl Session {
         let status = repo.status()?;
         let refs = repo.refs()?;
         let limit = self.view.commit_limit.clamp(1, gitcraft_git::log::MAX_LIMIT - 1);
-        let q = LogQuery {
-            revs: if self.view.history.is_some() { vec!["HEAD".into()] } else { Vec::new() },
-            limit: limit + 1,
-            path: self.view.history.clone(),
-            follow: self.view.history.is_some(),
-            ..LogQuery::default()
-        };
+        // Solo refs that still exist; none left means every ref again.
+        self.view.solo.retain(|f| refs.iter().any(|r| r.full == *f));
+        self.view.hidden.retain(|f| refs.iter().any(|r| r.full == *f));
+        let revs = if self.view.history.is_some() { vec!["HEAD".into()] } else { self.view.solo.clone() };
+        let mut exclude = self.view.hidden.clone();
+        if !self.view.show_remotes {
+            exclude.push("refs/remotes/*".into());
+        }
+        if !self.view.show_tags {
+            exclude.push("refs/tags/*".into());
+        }
+        let q =
+            LogQuery { revs, limit: limit + 1, path: self.view.history.clone(), follow: self.view.history.is_some(), exclude, ..LogQuery::default() };
         let mut commits = if status.head.is_some() || !refs.is_empty() { repo.log(&q)? } else { Vec::new() };
         let more = commits.len() > limit;
         commits.truncate(limit);
@@ -320,7 +366,14 @@ impl Session {
         let row_of = commits.iter().enumerate().map(|(i, c)| (c.oid.clone(), i)).collect();
         let mut labels: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, r) in refs.iter().enumerate() {
-            labels.entry(r.commit.clone()).or_default().push(i);
+            let shown = match r.kind {
+                RefKind::Remote => self.view.show_remotes,
+                RefKind::Tag => self.view.show_tags,
+                _ => true,
+            } && !self.view.hidden.contains(&r.full);
+            if shown {
+                labels.entry(r.commit.clone()).or_default().push(i);
+            }
         }
         let stashes = repo.stashes().unwrap_or_default();
         let remotes = repo.remotes().unwrap_or_default();
@@ -367,6 +420,7 @@ impl Session {
             Some(FileSel { path, area: Area::Unstaged }) => self.data.status.unstaged().any(|f| &f.path == path),
             Some(FileSel { path, area: Area::Staged }) => self.data.status.staged().any(|f| &f.path == path),
             Some(FileSel { area: Area::Commit(oid), .. }) => self.sel.row == Selected::Commit(oid.clone()),
+            Some(FileSel { area: Area::Compare { from, to }, .. }) => self.view.compare.as_ref() == Some(&(from.clone(), to.clone())),
         };
         if !keep {
             self.sel.file = None;
@@ -447,6 +501,7 @@ impl Session {
             Area::Unstaged => repo.diff_unstaged_with(&sel.path, o)?,
             Area::Staged => repo.diff_staged_with(&sel.path, o)?,
             Area::Commit(oid) => repo.diff_commit_file_with(oid, &sel.path, o)?,
+            Area::Compare { from, to } => repo.diff_range_file(from, to.as_deref(), &sel.path, o)?,
         })
     }
 
@@ -474,6 +529,7 @@ impl Session {
             Area::Unstaged => ("index".to_string(), "worktree".to_string()),
             Area::Staged => ("HEAD".to_string(), "index".to_string()),
             Area::Commit(o) => (format!("{o}^1"), o.clone()),
+            Area::Compare { from, to } => (from.clone(), to.clone().unwrap_or_else(|| "worktree".into())),
         };
         let old =
             self.file_bytes(&sel.path, &old).ok().or_else(|| if sel.area == Area::Unstaged { self.file_bytes(&sel.path, "HEAD").ok() } else { None });
@@ -509,6 +565,7 @@ impl Session {
             "moreCommits": self.data.more,
             "selection": self.sel,
             "draft": self.draft,
+            "view": self.view,
             "canUndo": self.undo.last().map(UndoStep::label),
             "canRedo": self.redo.last().map(UndoStep::label),
         })
