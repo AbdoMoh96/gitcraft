@@ -133,6 +133,18 @@ pub fn reveal(path: &Path) -> Result<(), String> {
     std::process::Command::new(prog).arg(path).spawn().map(|_| ()).map_err(|e| format!("{prog}: {e}"))
 }
 
+/// Open a web address in the browser (http and https only).
+pub fn open_url(url: &str) -> Result<(), String> {
+    let u = url.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) || u.contains(['\n', '\r', '\0', ' ']) {
+        return Err(format!("not a web address: {u}"));
+    }
+    if cfg!(test) {
+        return Ok(());
+    }
+    open_path(Path::new(u))
+}
+
 /// Open a file with the system's default app.
 pub fn open_path(path: &Path) -> Result<(), String> {
     let mut c = if cfg!(target_os = "macos") {

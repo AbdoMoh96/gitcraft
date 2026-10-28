@@ -239,7 +239,8 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui, path: &str) {
     let mut run: Option<(&'static str, Value)> = None;
     let mut dialog: Option<Dialog> = None;
     let Some(mut m) = app.merge.take() else { return };
-    header(ui, &mut m, &mut run, &mut dialog);
+    let ai = app.session.data.setting("gitcraft.aicommand").is_some();
+    header(ui, &mut m, &mut run, &mut dialog, ai);
     if let Some(e) = &m.error {
         Frame::NONE.fill(t.warning_bg).inner_margin(10).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -269,7 +270,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui, path: &str) {
     }
 }
 
-fn header(ui: &mut egui::Ui, m: &mut MergeTool, run: &mut Option<(&'static str, Value)>, dialog: &mut Option<Dialog>) {
+fn header(ui: &mut egui::Ui, m: &mut MergeTool, run: &mut Option<(&'static str, Value)>, dialog: &mut Option<Dialog>, ai: bool) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.chrome).inner_margin(Margin::symmetric(8, 5)).stroke(Stroke::new(1.0, t.border)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -329,6 +330,11 @@ fn header(ui: &mut egui::Ui, m: &mut MergeTool, run: &mut Option<(&'static str, 
             ui.separator();
             if ui.button("External Merge Tool").on_hover_text("Open the file in the merge tool set in git (merge.tool)").clicked() {
                 *run = Some(("tool.merge", json!({"path": m.path})));
+            }
+            if ai && ui.button("Suggest (AI)").on_hover_text("Ask your AI command how to resolve this file").clicked() {
+                *run = Some(("conflict.suggest", json!({"path": m.path})));
+                *dialog =
+                    Some(Dialog::AiText { title: format!("Conflict help: {}", m.path), id: "conflict.suggest".into(), field: "suggestion".into() });
             }
         });
     });

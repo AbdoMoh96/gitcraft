@@ -97,6 +97,15 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 if tool(app, ui, Icon::Terminal, "Terminal", "ui.terminal") {
                     let _ = app.run("ui.terminal", json!({}));
                 }
+                if crate::hosting_ui::forge_kind(app) == Some(gitcraft_engine::git::forge::ForgeKind::GitHub) {
+                    let r = icons::tool(ui, Icon::Cloud, "Launchpad", "Your pull requests, reviews and issues across GitHub", None);
+                    if r.clicked() {
+                        app.dialog = Some(Dialog::Launchpad);
+                        if !app.hosting.contains_key("launchpad.open") {
+                            let _ = app.run("launchpad.open", json!({}));
+                        }
+                    }
+                }
                 if !app.conflict_warnings().is_empty() {
                     separator(ui);
                     crate::conflict_alert::show(app, ui);
@@ -234,6 +243,21 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
                     ui.close();
                 }
             }
+        }
+        if app.session.repo.is_some() {
+            if ui.button("Insights…").clicked() {
+                app.dialog = Dialog::named("repo.insights", &app.session, &json!({}));
+                ui.close();
+            }
+            if ui.button("Team: Changes Like Yours…").clicked() {
+                app.dialog = Dialog::named("team.overlap", &app.session, &json!({}));
+                ui.close();
+            }
+        }
+        if ui.button("Accounts and AI…").clicked() {
+            app.dialog = Dialog::named("integrations.connect", &app.session, &json!({}));
+            let _ = app.run("integrations.connect", json!({}));
+            ui.close();
         }
         if ui.button("SSH Keys…").clicked() {
             app.dialog = Dialog::named("ssh.keys", &app.session, &json!({}));

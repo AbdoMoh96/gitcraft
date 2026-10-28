@@ -120,6 +120,15 @@ pub fn specs() -> Vec<CommandSpec> {
                 r#"{"scope"?: "local" | "global", "format"?: "openpgp" | "ssh" | "x509", "key"?: string, "signCommits"?: bool, "signTags"?: bool}"#,
             )
             .when(need_repo),
+        CommandSpec::new("config.ai", "AI Command", "Preferences", |s, v| {
+            let repo = s.repo()?.clone();
+            if let Some(c) = setting(v, "command") {
+                repo.set_config(scope(v).unwrap_or(ConfigScope::Global), "gitcraft.aiCommand", c)?;
+            }
+            Ok(json!({"command": repo.config("gitcraft.aiCommand")}))
+        })
+        .params(r#"{"command"?: string (empty turns AI off), "scope"?: "global" (default) | "local"}"#)
+        .when(need_repo),
         CommandSpec::new("ssh.keys", "SSH Keys", "Preferences", ssh_keys).pure(),
         CommandSpec::new("ssh.generate", "Generate SSH Key", "Preferences", ssh_generate)
             .params(r#"{"name"?: file name in ~/.ssh (id_ed25519), "type"?: "ed25519" | "rsa", "comment"?: string, "passphrase"?: string}"#)

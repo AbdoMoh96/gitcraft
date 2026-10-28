@@ -15,6 +15,7 @@ pub mod diff_view;
 pub mod editor;
 pub mod graph_view;
 pub mod highlight;
+pub mod hosting_ui;
 pub mod icons;
 pub mod merge_tool;
 pub mod palette;
@@ -237,6 +238,10 @@ pub struct GitApp {
     pub terminal_focused: bool,
     /// Give the terminal the keyboard on the next frame (it was just opened).
     pub terminal_focus_request: bool,
+    /// Text to type into the terminal once it's running (a sign-in command).
+    pub pending_terminal_input: Option<String>,
+    /// Results of background hosting and AI commands, by command id (for the panels that show them).
+    pub hosting: std::collections::HashMap<String, Value>,
     /// File notifications for the open repository.
     pub watcher: Option<watch::Watcher>,
     /// A work tree file open in the in-app editor.
@@ -324,7 +329,9 @@ impl GitApp {
             terminal_open: false,
             terminal_focused: false,
             terminal_focus_request: false,
+            pending_terminal_input: None,
             watcher: None,
+            hosting: Default::default(),
             picked_branches: Default::default(),
             picked_commits: Vec::new(),
             last_auto_fetch: util::now_s(),
@@ -377,6 +384,7 @@ impl GitApp {
     }
 
     fn after_open(&mut self) {
+        self.hosting.clear();
         self.pick = LinePick::default();
         self.blame = None;
         self.details = None;
@@ -597,6 +605,16 @@ impl GitApp {
             && let Some(p) = v.get("open").and_then(Value::as_str)
         {
             let _ = self.open_repo(Path::new(p));
+        }
+        if let Ok(v) = &r {
+            if hosting_ui::KEPT.contains(&id) {
+                self.hosting.insert(id.to_string(), v.clone());
+            }
+            // A generated message goes into the commit panel.
+            if id == "commit.generateMessage" {
+                self.session.draft.summary = v.get("summary").and_then(Value::as_str).unwrap_or("").to_string();
+                self.session.draft.description = v.get("description").and_then(Value::as_str).unwrap_or("").to_string();
+            }
         }
         let had = self.session.repo.as_ref().map(|x| x.root().to_path_buf());
         self.after_command(id, &r, had.as_deref());

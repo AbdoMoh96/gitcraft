@@ -122,6 +122,12 @@ fn every_view_lays_out() {
         "ui.profile",
         "repo.scan",
         "ui.learn",
+        "pr.create",
+        "launchpad.open",
+        "integrations.connect",
+        "repo.insights",
+        "team.overlap",
+        "commit.explain",
         "shortcuts",
         "preferences",
     ] {

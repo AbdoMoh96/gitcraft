@@ -78,6 +78,33 @@ pub enum Dialog {
     Workspaces {
         name: String,
     },
+    CreatePr {
+        title: String,
+        body: String,
+        head: String,
+        base: String,
+        draft: bool,
+        /// An AI description was asked for and hasn't arrived yet.
+        asked: bool,
+    },
+    Launchpad,
+    /// Hosting accounts and the AI command.
+    Accounts {
+        ai: String,
+    },
+    Insights {
+        days: u64,
+        data: Value,
+    },
+    Team {
+        data: Value,
+    },
+    /// An AI answer: the dialog title, the command id and the answer's field.
+    AiText {
+        title: String,
+        id: String,
+        field: String,
+    },
     /// Learn Git: a practice repository and lessons that tick off as they're done.
     Learn {
         path: String,
@@ -270,6 +297,26 @@ impl Dialog {
             }
             "hooks.list" => Dialog::Hooks { selected: String::new(), script: String::new() },
             "ui.learn" | "learn" => Dialog::Learn { path: std::path::PathBuf::from(home()).join("gitcraft-practice").display().to_string() },
+            "pr.create" => {
+                let head = st("head").or_else(|| s.data.status.branch.clone())?;
+                let base = st("base").unwrap_or_else(|| {
+                    s.repo
+                        .as_ref()
+                        .and_then(|r| r.remote_head("origin"))
+                        .map(|h| h.rsplit('/').next().unwrap_or(&h).to_string())
+                        .unwrap_or_else(|| "main".into())
+                });
+                let title = s.repo.as_ref().and_then(|r| r.find_commit(&head).ok()).map(|c| c.summary).unwrap_or_default();
+                Dialog::CreatePr { title, body: String::new(), head, base, draft: false, asked: false }
+            }
+            "launchpad.open" => Dialog::Launchpad,
+            "integrations.connect" | "accounts" => {
+                Dialog::Accounts { ai: s.repo.as_ref().and_then(|r| r.config("gitcraft.aiCommand")).unwrap_or_default() }
+            }
+            "repo.insights" => Dialog::Insights { days: 90, data: Value::Null },
+            "team.overlap" => Dialog::Team { data: Value::Null },
+            "commit.explain" => Dialog::AiText { title: "Explain Commit".into(), id: "commit.explain".into(), field: "explanation".into() },
+            "conflict.suggest" => Dialog::AiText { title: "Conflict Help".into(), id: "conflict.suggest".into(), field: "suggestion".into() },
             "ui.workspaces" | "workspaces" => Dialog::Workspaces { name: String::new() },
             "ui.profile" | "profiles" => Dialog::Profiles { name: String::new(), git_name: String::new(), git_email: String::new() },
             "repo.scan" => Dialog::Scan { path: st("path").unwrap_or_else(home), found: Vec::new(), picked: Vec::new(), workspace: String::new() },
@@ -352,6 +399,12 @@ impl Dialog {
             Dialog::AddSubmodule { .. } => "submodule.add",
             Dialog::RenameStash { .. } => "stash.rename",
             Dialog::Workspaces { .. } => "ui.workspaces",
+            Dialog::CreatePr { .. } => "pr.create",
+            Dialog::Launchpad => "launchpad.open",
+            Dialog::Accounts { .. } => "integrations.connect",
+            Dialog::Insights { .. } => "repo.insights",
+            Dialog::Team { .. } => "team.overlap",
+            Dialog::AiText { .. } => "ai",
             Dialog::Learn { .. } => "ui.learn",
             Dialog::Profiles { .. } => "ui.profile",
             Dialog::Scan { .. } => "repo.scan",
@@ -373,14 +426,14 @@ impl Dialog {
 }
 
 /// What the dialog asks for when it closes.
-enum Close {
+pub(crate) enum Close {
     Keep,
     Cancel,
     Run(String, Value),
     Open(PathBuf),
 }
 
-fn field(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str, focus: bool) -> egui::Response {
+pub(crate) fn field(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str, focus: bool) -> egui::Response {
     ui.label(RichText::new(label).small().strong());
     let r = ui.add(egui::TextEdit::singleline(text).hint_text(hint).desired_width(f32::INFINITY));
     if focus {
@@ -390,7 +443,7 @@ fn field(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str, focus: b
     r
 }
 
-fn buttons(ui: &mut egui::Ui, action: &str, ok: bool, danger: bool) -> (bool, bool) {
+pub(crate) fn buttons(ui: &mut egui::Ui, action: &str, ok: bool, danger: bool) -> (bool, bool) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(8.0);
     let mut submit = false;
@@ -474,6 +527,36 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             ui.heading("Clone Repository");
             ui.add_space(6.0);
             field(ui, "URL", url, "https://host/owner/repo.git or git@host:owner/repo.git", first);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Or pick one of yours:").small().color(t.dim));
+                for (provider, label) in [("github", "GitHub"), ("gitlab", "GitLab")] {
+                    if ui
+                        .small_button(label)
+                        .on_hover_text(format!("Your {label} repositories (through the {} tool)", if provider == "github" { "gh" } else { "glab" }))
+                        .clicked()
+                    {
+                        app.hosting.remove("hosting.repos");
+                        let _ = app.run("hosting.repos", json!({"provider": provider}));
+                    }
+                }
+                if app.busy("hosting.repos") {
+                    ui.add(egui::Spinner::new().size(12.0));
+                }
+            });
+            if let Some(list) = app.hosting.get("hosting.repos").and_then(|v| v["repositories"].as_array().cloned()) {
+                egui::ScrollArea::vertical().id_salt("my_repos").max_height(150.0).show(ui, |ui| {
+                    for r in list {
+                        let name = r["name"].as_str().unwrap_or("");
+                        if ui
+                            .selectable_label(url.as_str() == r["url"].as_str().unwrap_or(""), name)
+                            .on_hover_text(r["description"].as_str().unwrap_or(""))
+                            .clicked()
+                        {
+                            *url = r["url"].as_str().unwrap_or("").to_string();
+                        }
+                    }
+                });
+            }
             ui.label(RichText::new("WHERE").small().strong());
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(into).desired_width(330.0));
@@ -695,6 +778,22 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
             }
         }
+        Dialog::CreatePr { .. } => return crate::hosting_ui::create_pr_body(app, ui, d, first),
+        Dialog::Launchpad => return crate::hosting_ui::launchpad_body(app, ui),
+        Dialog::Accounts { ai } => return crate::hosting_ui::accounts_body(app, ui, ai),
+        Dialog::Insights { days, data } => {
+            if data.is_null() {
+                *data = app.session.run("repo.insights", &json!({"days": *days})).unwrap_or_else(|e| json!({"error": e.to_string()}));
+            }
+            return crate::hosting_ui::insights_body(app, ui, days, data);
+        }
+        Dialog::Team { data } => {
+            if data.is_null() {
+                *data = app.session.run("team.overlap", &json!({})).unwrap_or_else(|e| json!({"error": e.to_string()}));
+            }
+            return crate::hosting_ui::team_body(app, ui, data);
+        }
+        Dialog::AiText { title, id, field } => return crate::hosting_ui::ai_text_body(app, ui, title, id, field),
         Dialog::Learn { path } => {
             ui.set_width(560.0);
             ui.heading("Learn Git with GitCraft");

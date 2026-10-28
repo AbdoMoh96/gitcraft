@@ -1,11 +1,13 @@
 //! Command implementations, one module per area. Each module exposes `specs()`.
 
+pub mod assist;
 pub mod branch;
 pub mod commit;
 pub mod config;
 pub mod conflict;
 pub mod edit;
 pub mod history;
+pub mod hosting;
 pub mod inspect;
 pub mod merge;
 pub mod modules;
@@ -41,6 +43,8 @@ pub fn registry() -> Registry {
     v.extend(config::specs());
     v.extend(modules::specs());
     v.extend(tools::specs());
+    v.extend(hosting::specs());
+    v.extend(assist::specs());
     Registry::new(v)
 }
 

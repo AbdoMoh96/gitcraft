@@ -287,6 +287,7 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
         }
     }
     submodules_and_worktrees(app, ui);
+    crate::hosting_ui::sections(app, ui);
     let _ = RichText::new("");
 }
 
@@ -442,6 +443,10 @@ pub fn branch_menu(app: &mut GitApp, ui: &mut egui::Ui, r: &Ref) {
         }
         if ui.button("Rename…").clicked() {
             app.dialog = Dialog::named("branch.rename", &app.session, &json!({"from": r.name}));
+            ui.close();
+        }
+        if crate::hosting_ui::forge_kind(app).is_some() && ui.button("Create Pull Request…").clicked() {
+            app.dialog = Dialog::named("pr.create", &app.session, &json!({"head": r.name}));
             ui.close();
         }
         if !r.head && ui.button(format!("Delete {}", r.name)).clicked() {

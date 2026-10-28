@@ -551,6 +551,16 @@ fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Opt
         if ui.small_button(label).clicked() {
             app.dialog = Dialog::named("commit.coAuthors", &app.session, &json!({}));
         }
+        if app.session.data.setting("gitcraft.aicommand").is_some() {
+            let busy = app.busy("commit.generateMessage");
+            if ui
+                .add_enabled(!busy && staged > 0, egui::Button::new(if busy { "Writing…" } else { "Generate (AI)" }).small())
+                .on_hover_text("Write the message from the staged changes with your AI command")
+                .clicked()
+            {
+                *run = Some(("commit.generateMessage", json!({})));
+            }
+        }
         if app.session.data.setting("commit.template").is_some()
             && ui.small_button("Template").on_hover_text("Fill an empty message from the commit template").clicked()
         {

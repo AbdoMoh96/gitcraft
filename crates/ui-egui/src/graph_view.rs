@@ -997,6 +997,21 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
         }
         ui.close();
     }
+    if app.session.data.setting("gitcraft.aicommand").is_some() && item(ui, "commit.explain", "Explain Commit (AI)") {
+        actions.push(Action::Run("commit.explain", json!({"oid": c.oid})));
+        actions.push(Action::Dialog(Dialog::AiText { title: format!("Explain {short}"), id: "commit.explain".into(), field: "explanation".into() }));
+        ui.close();
+    }
+    if crate::hosting_ui::forge_kind(app).is_some() && item(ui, "cloudpatch.create", "Share as Cloud Patch…") {
+        actions.push(Action::Dialog(Dialog::confirm(
+            &format!("Share {short} as a patch?"),
+            "It's uploaded as a secret gist (GitHub) or private snippet (GitLab) on your account; anyone with the link can read it.",
+            "cloudpatch.create",
+            json!({"oid": c.oid}),
+            "Share",
+        )));
+        ui.close();
+    }
     if ui.button(format!("Highlight Commits by {}", c.author.name)).clicked() {
         actions.push(Action::Run("view.search", json!({"text": c.author.email})));
         ui.close();

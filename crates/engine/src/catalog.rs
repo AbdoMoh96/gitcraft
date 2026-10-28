@@ -177,6 +177,13 @@ Settings|Preferences|Zoom|ui.zoom
 Integrations|Hosting|Hosting Service Accounts|integrations.connect
 Integrations|Hosting|Cloud Patches|cloudpatch.create
 Integrations|Hosting|Launchpad|launchpad.open
+Integrations|Hosting|Check Out a Pull Request|pr.checkout
+Integrations|Hosting|Clone from Your Account|hosting.repos
+Integrations|AI|Explain Commit|commit.explain
+Integrations|AI|Write Pull Request Description|pr.describe
+Integrations|AI|Conflict Resolution Help|conflict.suggest
+Integrations|Team|Changes Like Yours (Team Overlap)|team.overlap
+Repository|Management|Insights|repo.insights
 ";
 
 /// Commands implemented by the UI (`ui.*`), not the engine. `gitcraft-ui-egui` checks that it
@@ -278,7 +285,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 158;
+    const FLOOR: usize = 173;
 
     #[test]
     fn parity_floor() {

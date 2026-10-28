@@ -279,7 +279,8 @@ fn hostile_params_never_panic() {
         json!({"name": "", "to": "", "from": "", "upstream": ""}),
     ];
     // These would touch folders outside the test repository (ssh.generate writes to ~/.ssh).
-    let skip = ["repo.open", "repo.init", "repo.clone", "repo.practice", "ssh.generate"];
+    // The hosting ones would reach the network with the user's own account.
+    let skip = ["repo.open", "repo.init", "repo.clone", "repo.practice", "ssh.generate", "integrations.connect", "launchpad.open", "hosting.repos"];
     let (_d, mut s) = session("eng-hostile");
     let repo = s.repo().unwrap().clone();
     let ids: Vec<&'static str> = s.registry.all().iter().map(|c| c.id).collect();
@@ -299,7 +300,7 @@ fn hostile_params_never_panic() {
         }
     }
     // The safe junk for the commands that create or open folders.
-    for id in skip.iter().filter(|i| **i != "ssh.generate") {
+    for id in skip.iter().filter(|i| i.starts_with("repo.")) {
         for p in [json!({}), json!({"path": 5}), json!({"url": "--upload-pack=touch x", "path": ""})] {
             if let Err(e) = s.run(id, &p) {
                 assert!(!e.to_string().contains("internal error"), "{id} {p}: {e}");
@@ -736,4 +737,44 @@ fn practice_repository() {
     assert!(s.data.local_branches().any(|r| r.name == "try-something"));
     assert_eq!(s.data.status.unstaged().count(), 1, "a change waiting to be committed");
     assert!(s.run("repo.practice", &json!({"path": path.display().to_string()})).is_err(), "not empty");
+}
+
+#[test]
+fn ai_insights_and_team_overlap() {
+    let (d, mut s) = session("eng-assist");
+    let repo = s.repo().unwrap().clone();
+    // No AI command: a clear error; with one (here a fake that echoes a fixed answer), a message.
+    write(&repo, "x.txt", "x\n").unwrap();
+    run(&mut s, "stage.all", json!({}));
+    let e = s.run("commit.generateMessage", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("aiCommand"), "{e}");
+    if cfg!(unix) {
+        repo.set_config(gitcraft_git::ConfigScope::Local, "gitcraft.aiCommand", Some("cat >/dev/null; printf 'Add x\\n\\nBecause it was missing'"))
+            .unwrap();
+        let r = run(&mut s, "commit.generateMessage", json!({}));
+        assert_eq!(r["summary"], json!("Add x"));
+        assert_eq!(s.draft.description, "Because it was missing");
+        let r = run(&mut s, "commit.explain", json!({"oid": "HEAD"}));
+        assert!(r["explanation"].as_str().unwrap().contains("Add x"));
+        repo.set_config(gitcraft_git::ConfigScope::Local, "gitcraft.aiCommand", Some("exit 3")).unwrap();
+        assert!(s.run("commit.generateMessage", &json!({})).is_err());
+    }
+    let i = run(&mut s, "repo.insights", json!({"days": 30}));
+    assert_eq!(i["commits"], json!(2));
+    assert_eq!(i["authors"][0]["name"], json!("Ada Example"));
+    assert!(i["files"].as_array().unwrap().iter().any(|f| f["path"] == "src/main.rs"));
+    // A teammate's branch on the remote changes README.md, which we are changing too.
+    let up = repo.git().clone_repo(&repo.root().to_string_lossy(), &d.path().join("up")).unwrap();
+    up.create_branch("teammate", None, true).unwrap();
+    write(&up, "README.md", "theirs\n").unwrap();
+    gitcraft_git::testing::commit_all(&up, "Their readme").unwrap();
+    run(&mut s, "remote.add", json!({"name": "origin", "url": up.root().display().to_string()}));
+    run(&mut s, "remote.fetch", json!({}));
+    write(&repo, "README.md", "mine\n").unwrap();
+    run(&mut s, "repo.refresh", json!({}));
+    let t = run(&mut s, "team.overlap", json!({}));
+    let b = t["branches"].as_array().unwrap();
+    assert!(b.iter().any(|x| x["branch"] == "origin/teammate" && x["files"] == json!(["README.md"])), "{t}");
+    // Hosting needs GitHub or GitLab.
+    assert!(s.run("pr.list", &json!({})).is_err());
 }

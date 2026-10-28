@@ -9,6 +9,7 @@
 pub mod blame;
 pub mod conflict;
 pub mod diff;
+pub mod forge;
 pub mod log;
 pub mod modules;
 pub mod ops;

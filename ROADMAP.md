@@ -1,6 +1,6 @@
 # GitCraft roadmap
 
-**Stage:** M1 complete — a working Git client for the daily loop.
+**Stage:** M6 — parity with the incumbent's feature set, hosting through gh / glab.
 
 | Number | Value |
 |---|---|
@@ -13,6 +13,17 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M6.** Hosting through GitHub's `gh` and GitLab's `glab` (they keep the sign-in;
+  GitCraft never sees a token): Pull Requests, Issues and CI sections in the left panel (`pr.list`,
+  `issues.list`, `ci.list`; open, check out a pull request, branch for an issue), Create Pull Request
+  from a branch's menu (`pr.create`: pushes the branch first), the Launchpad (`launchpad.open`: your
+  pull requests, reviews waiting for you and assigned issues across GitHub), Clone › your
+  repositories (`hosting.repos`), Share as Cloud Patch (`cloudpatch.create`: a secret gist or private
+  snippet), and Accounts (`integrations.connect`: status, and Sign In runs `gh auth login` in the
+  terminal). AI through a command the user sets (`gitcraft.aiCommand`, Accounts and AI; off by
+  default): Generate commit message, Explain commit, Write pull request description, Conflict help.
+  Insights (`repo.insights`: commits by author, weekday, most changed files) and Team: Changes Like
+  Yours (`team.overlap`: recent remote branches touching the files you're changing), both local.
 - **2026-10-28 — M3.** A terminal inside GitCraft (`ui.terminal`, Mod+`): the user's shell in a
   pseudo-terminal (portable-pty) opened in the repository, shown in a resizable panel at the bottom
   and drawn by a VT100 emulator (vt100), with colours, scrollback and the keys a shell needs; the

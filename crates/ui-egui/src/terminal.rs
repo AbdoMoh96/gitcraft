@@ -252,8 +252,12 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             }
             let focused = ui.memory(|m| m.has_focus(resp.id));
             app.terminal_focused = focused;
+            let pending = app.pending_terminal_input.take();
             let Some(term) = app.terminal.as_mut() else { return };
             term.resize(rows, cols);
+            if let Some(text) = pending {
+                term.send(text.as_bytes());
+            }
             if focused {
                 // Keep Tab and arrows in the terminal.
                 ui.memory_mut(|m| {
