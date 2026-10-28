@@ -108,11 +108,28 @@ pub struct ViewState {
     pub blame: bool,
     /// The file whose history the graph is showing, if any.
     pub history: Option<String>,
+    /// Diffs leave out changes in whitespace (`git diff -w`); lines can't be staged then.
+    pub ignore_whitespace: bool,
+    /// Highlight the words that changed within changed lines.
+    pub word_diff: bool,
+    /// Colour code by language.
+    pub syntax: bool,
 }
 
 impl Default for ViewState {
     fn default() -> Self {
-        ViewState { diff_mode: DiffMode::Hunk, context: 3, commit_limit: 2000, left_panel: true, search: String::new(), blame: false, history: None }
+        ViewState {
+            diff_mode: DiffMode::Hunk,
+            context: 3,
+            commit_limit: 2000,
+            left_panel: true,
+            search: String::new(),
+            blame: false,
+            history: None,
+            ignore_whitespace: false,
+            word_diff: true,
+            syntax: true,
+        }
     }
 }
 
@@ -198,7 +215,7 @@ pub struct Session {
     detached: bool,
     /// Bumped by every reload; keys the diff cache.
     generation: u64,
-    diff_cache: Option<((FileSel, u32, bool, u64), Result<FileDiff, CmdError>)>,
+    diff_cache: Option<((FileSel, u32, bool, bool, u64), Result<FileDiff, CmdError>)>,
 }
 
 impl Default for Session {
@@ -403,7 +420,8 @@ impl Session {
     /// The diff of the selected file (cached until the next reload).
     pub fn selected_diff(&mut self) -> Option<Result<FileDiff, CmdError>> {
         let sel = self.sel.file.clone()?;
-        let key = (sel.clone(), self.view.context, self.view.diff_mode == DiffMode::Inline, self.generation);
+        let ws = self.view.ignore_whitespace;
+        let key = (sel.clone(), self.view.context, self.view.diff_mode == DiffMode::Inline, ws, self.generation);
         if let Some((k, d)) = &self.diff_cache
             && *k == key
         {
@@ -411,18 +429,55 @@ impl Session {
         }
         // Inline shows the whole file: as much context as it has lines.
         let context = if self.view.diff_mode == DiffMode::Inline { 100_000 } else { self.view.context };
-        let d = self.diff_for(&sel, context);
+        let d = self.diff_with(&sel, context, ws);
         self.diff_cache = Some((key, d.clone()));
         Some(d)
     }
 
+    /// The diff of a file as staging sees it (whitespace included).
     pub fn diff_for(&self, sel: &FileSel, context: u32) -> Result<FileDiff, CmdError> {
+        self.diff_with(sel, context, false)
+    }
+
+    /// The diff of a file, leaving out whitespace changes when `ignore_ws`.
+    pub fn diff_with(&self, sel: &FileSel, context: u32, ignore_ws: bool) -> Result<FileDiff, CmdError> {
         let repo = self.repo()?;
+        let o = gitcraft_git::diff::DiffOpts { context, ignore_whitespace: ignore_ws };
         Ok(match &sel.area {
-            Area::Unstaged => repo.diff_unstaged(&sel.path, context)?,
-            Area::Staged => repo.diff_staged(&sel.path, context)?,
-            Area::Commit(oid) => repo.diff_commit_file(oid, &sel.path, context)?,
+            Area::Unstaged => repo.diff_unstaged_with(&sel.path, o)?,
+            Area::Staged => repo.diff_staged_with(&sel.path, o)?,
+            Area::Commit(oid) => repo.diff_commit_file_with(oid, &sel.path, o)?,
         })
+    }
+
+    /// A file's bytes at `rev`: a commit, `index`, or `worktree` (read from disk, inside the
+    /// repository only).
+    pub fn file_bytes(&self, path: &str, rev: &str) -> Result<Vec<u8>, CmdError> {
+        let repo = self.repo()?;
+        let path = gitcraft_git::check_path(path)?;
+        match rev {
+            "worktree" | "wip" => {
+                if path.split(['/', '\\']).any(|c| c == "..") || Path::new(path).is_absolute() {
+                    return Err(CmdError::Params("the path must be inside the repository".into()));
+                }
+                std::fs::read(repo.root().join(path)).map_err(|e| CmdError::Failed(format!("{path}: {e}")))
+            }
+            "index" => Ok(repo.show_file(":0", path)?),
+            r => Ok(repo.show_file(gitcraft_git::check_name("revision", r)?, path)?),
+        }
+    }
+
+    /// The old and new bytes of the selected file's change (for image diffs): `None` for a side
+    /// that doesn't exist (an added or deleted file).
+    pub fn file_sides(&self, sel: &FileSel) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+        let (old, new) = match &sel.area {
+            Area::Unstaged => ("index".to_string(), "worktree".to_string()),
+            Area::Staged => ("HEAD".to_string(), "index".to_string()),
+            Area::Commit(o) => (format!("{o}^1"), o.clone()),
+        };
+        let old =
+            self.file_bytes(&sel.path, &old).ok().or_else(|| if sel.area == Area::Unstaged { self.file_bytes(&sel.path, "HEAD").ok() } else { None });
+        (old, self.file_bytes(&sel.path, &new).ok())
     }
 
     /// The state agents see (`repo.status` / the `gitcraft://repository` resource).

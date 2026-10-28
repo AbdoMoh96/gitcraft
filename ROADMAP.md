@@ -13,6 +13,12 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M4.** Diff quality: View › Ignore whitespace (`view.ignoreWhitespace`, `git diff -w`;
+  staging is disabled while it hides changes), Highlight changed words (`view.wordDiff`: the words
+  that differ between a removed line and the added line that replaced it), Syntax colours
+  (`view.syntax`: GitCraft's own highlighter for about twenty languages, chosen by extension).
+  Changed images (PNG, JPEG, GIF, BMP, WebP, ICO) show before and after side by side.
+  `file.content` returns a file at a commit, in the index or in the work tree.
 - **2026-10-28 — M2.** Interactive rebase (`rebase.interactive`): Graph › Edit History › Interactive
   Rebase from Here opens the commits up to HEAD, newest first; each can be picked, reworded (with a new
   message), squashed, fixed up or dropped, and moved up or down. GitCraft writes the todo list and git

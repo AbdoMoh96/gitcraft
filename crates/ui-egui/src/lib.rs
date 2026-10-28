@@ -13,6 +13,7 @@ pub mod control;
 pub mod dialogs;
 pub mod diff_view;
 pub mod graph_view;
+pub mod highlight;
 pub mod icons;
 pub mod merge_tool;
 pub mod palette;
@@ -166,6 +167,10 @@ pub struct GitApp {
     pub tabs: tabs::Tabs,
     /// Merge conflicts predicted in the background.
     pub conflict_alert: conflict_alert::ConflictAlert,
+    /// Changed words of the diff on screen: (path, area, generation, context, whitespace) → cache.
+    pub words: ((String, String, u64, u32, bool), diff_view::WordCache),
+    /// The image diff on screen: key, old and new pictures.
+    pub images: Option<(String, Option<egui::TextureHandle>, Option<egui::TextureHandle>)>,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -214,6 +219,8 @@ impl GitApp {
             merge: None,
             tabs: tabs::Tabs::default(),
             conflict_alert: conflict_alert::ConflictAlert::default(),
+            words: Default::default(),
+            images: None,
         }
     }
 

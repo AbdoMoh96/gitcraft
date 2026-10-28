@@ -47,8 +47,24 @@ fn diff(s: &mut Session, v: &Value) -> CmdResult {
     let area = Area::parse(p::str(v, "area").unwrap_or(if oid.is_some() { "commit" } else { "unstaged" }), oid)
         .ok_or_else(|| CmdError::Params("`area` is unstaged, staged or commit (with `oid`)".into()))?;
     let context = p::u64(v, "context").map(|c| c.min(100_000) as u32).unwrap_or(s.view.context);
-    let d = s.diff_for(&FileSel { path, area }, context)?;
+    let ws = p::bool(v, "ignoreWhitespace").unwrap_or(false);
+    let d = s.diff_with(&FileSel { path, area }, context, ws)?;
     serde_json::to_value(&d).map_err(|e| CmdError::Failed(e.to_string()))
+}
+
+/// Largest file `file.content` returns.
+const MAX_CONTENT: usize = 8 * 1024 * 1024;
+
+/// A file's content at a revision, in the index (`rev: "index"`) or in the work tree
+/// (`rev: "worktree"`).
+fn content(s: &mut Session, v: &Value) -> CmdResult {
+    let path = p::req_str(v, "path")?.to_string();
+    let rev = p::str(v, "rev").filter(|r| !r.trim().is_empty()).unwrap_or("HEAD").trim().to_string();
+    let bytes = s.file_bytes(&path, &rev)?;
+    let binary = bytes.iter().take(8000).any(|b| *b == 0);
+    let truncated = bytes.len() > MAX_CONTENT;
+    let text = if binary { String::new() } else { String::from_utf8_lossy(bytes.get(..MAX_CONTENT).unwrap_or(&bytes)).into_owned() };
+    Ok(json!({"path": path, "rev": rev, "size": bytes.len(), "binary": binary, "truncated": truncated, "text": text}))
 }
 
 fn blame(s: &mut Session, v: &Value) -> CmdResult {
@@ -67,7 +83,11 @@ pub fn specs() -> Vec<CommandSpec> {
             .when(need_repo),
         CommandSpec::new("commit.show", "Commit Details", "Graph", show).params(r#"{"oid"?: commit (default: selected)}"#).pure().when(need_commits),
         CommandSpec::new("diff.file", "File Diff", "Diff View", diff)
-            .params(r#"{"path": string, "area"?: "unstaged" | "staged" | "commit", "oid"?: commit, "context"?: number}"#)
+            .params(r#"{"path": string, "area"?: "unstaged" | "staged" | "commit", "oid"?: commit, "context"?: number, "ignoreWhitespace"?: bool}"#)
+            .pure()
+            .when(need_repo),
+        CommandSpec::new("file.content", "View File", "Diff View", content)
+            .params(r#"{"path": string, "rev"?: commit | "index" | "worktree" (default HEAD)}"#)
             .pure()
             .when(need_repo),
         CommandSpec::new("file.blame", "File Blame", "Diff View", blame).params(r#"{"path": string, "rev"?: commit}"#).pure().when(need_commits),

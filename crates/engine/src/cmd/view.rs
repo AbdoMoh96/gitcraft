@@ -114,6 +114,24 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"value": number (0–100)}"#)
         .pure(),
+        CommandSpec::new("view.ignoreWhitespace", "Ignore Whitespace", "Diff View", |s, v| {
+            s.view.ignore_whitespace = toggle(s.view.ignore_whitespace, v);
+            Ok(json!({"value": s.view.ignore_whitespace}))
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
+        CommandSpec::new("view.wordDiff", "Word Highlighting", "Diff View", |s, v| {
+            s.view.word_diff = toggle(s.view.word_diff, v);
+            Ok(json!({"value": s.view.word_diff}))
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
+        CommandSpec::new("view.syntax", "Syntax Highlighting", "Diff View", |s, v| {
+            s.view.syntax = toggle(s.view.syntax, v);
+            Ok(json!({"value": s.view.syntax}))
+        })
+        .params(r#"{"value"?: bool}"#)
+        .pure(),
         CommandSpec::new("view.leftPanel", "Left Panel", "View", |s, v| {
             s.view.left_panel = toggle(s.view.left_panel, v);
             Ok(json!({"value": s.view.left_panel}))

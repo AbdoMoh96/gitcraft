@@ -269,14 +269,41 @@ fn context_arg(context: u32) -> String {
     format!("-U{}", context.min(10_000))
 }
 
+/// How a diff is computed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiffOpts {
+    /// Lines of context around each change.
+    pub context: u32,
+    /// Leave out changes in whitespace (`-w`). Such a diff can't be applied as a patch.
+    pub ignore_whitespace: bool,
+}
+
+impl DiffOpts {
+    pub fn context(context: u32) -> DiffOpts {
+        DiffOpts { context, ignore_whitespace: false }
+    }
+    fn args(&self) -> Vec<String> {
+        let mut v = vec![context_arg(self.context)];
+        if self.ignore_whitespace {
+            v.push("--ignore-all-space".into());
+        }
+        v
+    }
+}
+
 impl Repo {
     /// The work tree's changes to `path` not yet staged (an untracked file shows as all added).
     pub fn diff_unstaged(&self, path: &str, context: u32) -> Result<FileDiff> {
+        self.diff_unstaged_with(path, DiffOpts::context(context))
+    }
+
+    pub fn diff_unstaged_with(&self, path: &str, opts: DiffOpts) -> Result<FileDiff> {
         let path = crate::check_path(path)?;
-        let u = context_arg(context);
+        let extra = opts.args();
         let untracked = self.status()?.file(path).is_some_and(|f| f.is_untracked());
         let o = if untracked {
-            let mut args = vec!["diff", "--no-index", u.as_str()];
+            let mut args = vec!["diff", "--no-index"];
+            args.extend(extra.iter().map(String::as_str));
             args.extend(DIFF_OPTS);
             args.extend(["--", null_device(), path]);
             let o = self.run(&args)?;
@@ -286,7 +313,8 @@ impl Repo {
             }
             o
         } else {
-            let mut args = vec!["diff", u.as_str()];
+            let mut args = vec!["diff"];
+            args.extend(extra.iter().map(String::as_str));
             args.extend(DIFF_OPTS);
             args.extend(["--", path]);
             self.run_paths(&args)?
@@ -296,9 +324,14 @@ impl Repo {
 
     /// The staged changes to `path`.
     pub fn diff_staged(&self, path: &str, context: u32) -> Result<FileDiff> {
+        self.diff_staged_with(path, DiffOpts::context(context))
+    }
+
+    pub fn diff_staged_with(&self, path: &str, opts: DiffOpts) -> Result<FileDiff> {
         let path = crate::check_path(path)?;
-        let u = context_arg(context);
-        let mut args = vec!["diff", "--cached", u.as_str()];
+        let extra = opts.args();
+        let mut args = vec!["diff", "--cached"];
+        args.extend(extra.iter().map(String::as_str));
         args.extend(DIFF_OPTS);
         args.extend(["--", path]);
         Ok(first_or_empty(parse(&self.run_paths(&args)?.stdout), path))
@@ -306,12 +339,17 @@ impl Repo {
 
     /// What commit `oid` changed in `path`, against its first parent.
     pub fn diff_commit_file(&self, oid: &str, path: &str, context: u32) -> Result<FileDiff> {
+        self.diff_commit_file_with(oid, path, DiffOpts::context(context))
+    }
+
+    pub fn diff_commit_file_with(&self, oid: &str, path: &str, opts: DiffOpts) -> Result<FileDiff> {
         let oid = crate::check_name("commit", oid)?;
         let path = crate::check_path(path)?;
-        let u = context_arg(context);
+        let extra = opts.args();
         let parent = format!("{oid}^1");
         let has_parent = self.resolve(&parent).is_some();
-        let mut args = if has_parent { vec!["diff", u.as_str(), parent.as_str(), oid] } else { vec!["diff-tree", "-p", "--root", u.as_str(), oid] };
+        let mut args = if has_parent { vec!["diff", parent.as_str(), oid] } else { vec!["diff-tree", "-p", "--root", oid] };
+        args.extend(extra.iter().map(String::as_str));
         args.extend(DIFF_OPTS);
         args.extend(["--", path]);
         Ok(first_or_empty(parse(&self.run_paths(&args)?.stdout), path))

@@ -10,8 +10,9 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
 2. ~~Merge tool output editor~~ — landed (`conflict.edit`). Next: syntax colours in its panes, a
    base column for `diff3`, editing a picked line in place.
 3. ~~Repository tabs~~ — landed (`ui.tabs`). Drag to reorder landed. Next: workspaces (`workspace.open`).
-4. **Diff quality** — `view.ignoreWhitespace` (`-w`), `view.wordDiff` (intra-line highlights),
-   `view.syntax` (a pure-Rust highlighter).
+4. ~~Diff quality~~ — landed: `view.ignoreWhitespace` (`-w`), `view.wordDiff` (word-level LCS between a
+   removed line and the added line replacing it), `view.syntax` (GitCraft's own per-line highlighter,
+   `crates/ui-egui/src/highlight.rs`), image diffs, `file.content`. Next: multi-line comment state.
 5. **Graph controls** — `graph.solo`, `graph.hide`, `graph.columns`, `diff.compare` (two selected commits).
 6. **Identity and signing** — `config.identity` (user.name / email per repo), `commit.sign`,
    `commit.noVerify`, `commit.template`.

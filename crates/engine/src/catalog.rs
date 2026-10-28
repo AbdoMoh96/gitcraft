@@ -225,7 +225,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 95;
+    const FLOOR: usize = 98;
 
     #[test]
     fn parity_floor() {

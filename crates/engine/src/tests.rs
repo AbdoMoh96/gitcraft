@@ -470,3 +470,35 @@ fn history_editing_squash_drop_move_and_undo() {
     assert!(s.run("rebase.interactive", &json!({"oid": a, "items": "x"})).is_err());
     assert!(s.run("commit.squash", &json!({"oid": repo.resolve("HEAD~3").unwrap()})).is_err(), "the root commit");
 }
+
+#[test]
+fn whitespace_diffs_file_content_and_view_toggles() {
+    let (_d, mut s) = session("eng-ws");
+    let repo = s.repo().unwrap().clone();
+    write(&repo, "src/main.rs", "fn main() {\n        println!(\"hello, world\");\n}\n").unwrap();
+    run(&mut s, "repo.refresh", json!({}));
+    let d = run(&mut s, "diff.file", json!({"path": "src/main.rs"}));
+    assert_eq!(d["hunks"].as_array().unwrap().len(), 1);
+    let d = run(&mut s, "diff.file", json!({"path": "src/main.rs", "ignoreWhitespace": true}));
+    assert!(d["hunks"].as_array().unwrap().is_empty(), "{d}");
+    run(&mut s, "view.ignoreWhitespace", json!({"value": true}));
+    run(&mut s, "file.select", json!({"path": "src/main.rs", "area": "unstaged"}));
+    assert!(s.selected_diff().unwrap().unwrap().hunks.is_empty());
+    run(&mut s, "view.ignoreWhitespace", json!({}));
+    assert!(!s.view.ignore_whitespace);
+    assert_eq!(s.selected_diff().unwrap().unwrap().hunks.len(), 1);
+    assert_eq!(run(&mut s, "view.wordDiff", json!({}))["value"], json!(false));
+    assert_eq!(run(&mut s, "view.syntax", json!({"value": false}))["value"], json!(false));
+    // File content at a revision, in the index and in the work tree.
+    let c = run(&mut s, "file.content", json!({"path": "README.md"}));
+    assert!(c["text"].as_str().unwrap().starts_with("# Sample"));
+    let c = run(&mut s, "file.content", json!({"path": "src/main.rs", "rev": "worktree"}));
+    assert!(c["text"].as_str().unwrap().contains("        println"));
+    let c = run(&mut s, "file.content", json!({"path": "src/main.rs", "rev": "index"}));
+    assert!(!c["text"].as_str().unwrap().contains("        println"));
+    for bad in
+        [json!({"path": "../x", "rev": "worktree"}), json!({"path": "/etc/passwd", "rev": "worktree"}), json!({"path": "README.md", "rev": "-x"})]
+    {
+        assert!(s.run("file.content", &bad).is_err(), "{bad}");
+    }
+}

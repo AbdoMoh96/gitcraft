@@ -139,6 +139,25 @@ fn header(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(
                 if ui.selectable_label(blame_on, "Blame").clicked() {
                     *run = Some(("view.blame", json!({"value": !blame_on})));
                 }
+                ui.menu_button("View", |ui| {
+                    let v = app.session.view.clone();
+                    for (id, on, label, tip) in [
+                        (
+                            "view.ignoreWhitespace",
+                            v.ignore_whitespace,
+                            "Ignore whitespace",
+                            "Leave out changes in spaces and tabs (lines can't be staged then)",
+                        ),
+                        ("view.wordDiff", v.word_diff, "Highlight changed words", "Mark the words that changed within a changed line"),
+                        ("view.syntax", v.syntax, "Syntax colours", "Colour code by language"),
+                    ] {
+                        let mut x = on;
+                        if ui.checkbox(&mut x, label).on_hover_text(tip).changed() {
+                            *run = Some((id, json!({"value": x})));
+                            ui.close();
+                        }
+                    }
+                });
                 ui.separator();
                 for m in DiffMode::ALL.iter().rev() {
                     if ui.selectable_label(app.session.view.diff_mode == *m && !blame_on, m.label()).clicked() {
@@ -166,6 +185,10 @@ fn display(text: &str) -> String {
 fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &mut Option<(&'static str, Value)>, dialog: &mut Option<Dialog>) {
     let t = Tokens::get(ui.ctx());
     if d.binary {
+        if is_image(&sel.path) {
+            image_diff(app, ui, sel);
+            return;
+        }
         ui.add_space(20.0);
         ui.vertical_centered(|ui| ui.label(RichText::new("Binary file: no text changes to show").weak()));
         return;
@@ -189,8 +212,19 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
     let split = app.session.view.diff_mode == DiffMode::Split;
     let rows = rows_for(d, split);
     let longest = d.hunks.iter().flat_map(|h| &h.lines).map(|l| l.text.chars().count()).max().unwrap_or(0).min(2000);
-    let editable = !matches!(sel.area, Area::Commit(_)) && !d.truncated;
     let ctx_used = context_used(app);
+    let editable = !matches!(sel.area, Area::Commit(_)) && !d.truncated && !app.session.view.ignore_whitespace;
+    if app.session.view.ignore_whitespace && !matches!(sel.area, Area::Commit(_)) {
+        Frame::NONE.fill(t.hunk_bg).inner_margin(6).show(ui, |ui| {
+            ui.label(RichText::new("Whitespace changes are hidden: turn them back on (View) to stage hunks or lines.").small().color(t.dim));
+        });
+    }
+    let lang = if app.session.view.syntax { crate::highlight::language(&sel.path) } else { None };
+    let words_on = app.session.view.word_diff;
+    let wkey = (sel.path.clone(), format!("{:?}", sel.area), app.session.generation(), ctx_used, app.session.view.ignore_whitespace);
+    if app.words.0 != wkey {
+        app.words = (wkey, Default::default());
+    }
     let mono = FontId::monospace(12.5);
     let width = ui.available_width();
     let content_w = if split { width } else { (GUTTER * 2.0 + 20.0 + longest as f32 * CHAR_W + 20.0).max(width) };
@@ -297,12 +331,18 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
                     };
                     p.text(pos2(rect.left() + GUTTER * 2.0 + 4.0, rect.center().y), egui::Align2::LEFT_CENTER, mark, mono.clone(), fg);
                     let text_c = if l.kind == LineKind::NoNewline { t.dim } else { t.text };
-                    p.text(
+                    let marks = if words_on { changed_words(&mut app.words.1, d, hi, li) } else { Vec::new() };
+                    let lang_here = if l.kind == LineKind::NoNewline { None } else { lang };
+                    paint_line(
+                        ui,
                         pos2(rect.left() + GUTTER * 2.0 + 18.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        display(&l.text),
-                        mono.clone(),
+                        &display(&l.text),
+                        lang_here,
+                        &marks,
+                        l.kind,
                         text_c,
+                        &mono,
+                        t,
                     );
                     if resp.clicked() && editable && matches!(l.kind, LineKind::Add | LineKind::Del) {
                         toggle = Some((hi, li));
@@ -330,7 +370,10 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
                             FontId::monospace(11.0),
                             t.dim,
                         );
-                        p.text(pos2(r.left() + GUTTER + 6.0, r.center().y), egui::Align2::LEFT_CENTER, display(&l.text), mono.clone(), t.text);
+                        let li = idx.unwrap_or(0);
+                        let marks = if words_on { changed_words(&mut app.words.1, d, hi, li) } else { Vec::new() };
+                        let galley = ui.painter().layout_job(line_layout(&display(&l.text), lang, &marks, l.kind, t.text, &mono, t));
+                        p.galley(pos2(r.left() + GUTTER + 6.0, r.center().y - galley.size().y / 2.0), galley, t.text);
                     }
                     ui.painter()
                         .line_segment([pos2(rect.left() + half, rect.top()), pos2(rect.left() + half, rect.bottom())], Stroke::new(1.0, t.border));
@@ -346,6 +389,140 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, d: &FileDiff, run: &
             app.pick.lines.insert(li);
         }
     }
+}
+
+/// Words changed within lines, by (hunk, line): computed once per diff on screen.
+pub type WordCache = std::collections::HashMap<(usize, usize), Vec<std::ops::Range<usize>>>;
+
+/// The removed (or added) line paired with line `li` of hunk `hi`: the n-th deletion of a run of
+/// deletions pairs with the n-th addition that follows it.
+fn partner(d: &FileDiff, hi: usize, li: usize) -> Option<usize> {
+    let h = d.hunks.get(hi)?;
+    let kind = h.lines.get(li)?.kind;
+    if !matches!(kind, LineKind::Add | LineKind::Del) {
+        return None;
+    }
+    // The run of changes around `li`.
+    let mut start = li;
+    while start > 0 && h.lines.get(start - 1).is_some_and(|l| matches!(l.kind, LineKind::Add | LineKind::Del | LineKind::NoNewline)) {
+        start -= 1;
+    }
+    let mut dels = Vec::new();
+    let mut adds = Vec::new();
+    let mut i = start;
+    while let Some(l) = h.lines.get(i) {
+        match l.kind {
+            LineKind::Del => dels.push(i),
+            LineKind::Add => adds.push(i),
+            LineKind::NoNewline => {}
+            LineKind::Context => break,
+        }
+        i += 1;
+    }
+    let (mine, other) = if kind == LineKind::Del { (&dels, &adds) } else { (&adds, &dels) };
+    let n = mine.iter().position(|&x| x == li)?;
+    other.get(n).copied()
+}
+
+fn changed_words(cache: &mut WordCache, d: &FileDiff, hi: usize, li: usize) -> Vec<std::ops::Range<usize>> {
+    if let Some(v) = cache.get(&(hi, li)) {
+        return v.clone();
+    }
+    let mut out = Vec::new();
+    if let (Some(other), Some(h)) = (partner(d, hi, li), d.hunks.get(hi))
+        && let (Some(me), Some(them)) = (h.lines.get(li), h.lines.get(other))
+    {
+        let (old, new) = if me.kind == LineKind::Del { (display(&me.text), display(&them.text)) } else { (display(&them.text), display(&me.text)) };
+        if let Some((del, add)) = crate::highlight::word_changes(&old, &new) {
+            let (mine, theirs) = if me.kind == LineKind::Del { (del, add) } else { (add, del) };
+            cache.insert((hi, other), theirs);
+            out = mine;
+        }
+    }
+    cache.insert((hi, li), out.clone());
+    out
+}
+
+fn line_layout(
+    text: &str,
+    lang: Option<&crate::highlight::Lang>,
+    marks: &[std::ops::Range<usize>],
+    kind: LineKind,
+    base: Color32,
+    font: &FontId,
+    t: Tokens,
+) -> egui::text::LayoutJob {
+    let mark_bg = if kind == LineKind::Del { t.removed_word_bg } else { t.added_word_bg };
+    crate::highlight::line_job(text, lang, marks, mark_bg, base, font.clone(), t)
+}
+
+/// Paint a line's text, left-aligned and vertically centred on `at`.
+fn paint_line(
+    ui: &egui::Ui,
+    at: egui::Pos2,
+    text: &str,
+    lang: Option<&crate::highlight::Lang>,
+    marks: &[std::ops::Range<usize>],
+    kind: LineKind,
+    base: Color32,
+    font: &FontId,
+    t: Tokens,
+) {
+    let galley = ui.painter().layout_job(line_layout(text, lang, marks, kind, base, font, t));
+    ui.painter().galley(pos2(at.x, at.y - galley.size().y / 2.0), galley, base);
+}
+
+fn is_image(path: &str) -> bool {
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "ico")
+}
+
+/// Largest image side shown.
+const MAX_IMAGE_SIDE: u32 = 8192;
+
+fn texture(ctx: &egui::Context, name: &str, bytes: Option<&[u8]>) -> Option<egui::TextureHandle> {
+    let img = image::load_from_memory(bytes?).ok()?;
+    if img.width() > MAX_IMAGE_SIDE || img.height() > MAX_IMAGE_SIDE {
+        return None;
+    }
+    let rgba = img.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let ci = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(name, ci, egui::TextureOptions::LINEAR))
+}
+
+/// An image's old and new versions side by side.
+fn image_diff(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel) {
+    let t = Tokens::get(ui.ctx());
+    let key = format!("{:?}{}@{}", sel.area, sel.path, app.session.generation());
+    if app.images.as_ref().map(|(k, ..)| k) != Some(&key) {
+        let (old, new) = app.session.file_sides(sel);
+        let a = texture(ui.ctx(), &format!("{key}:old"), old.as_deref());
+        let b = texture(ui.ctx(), &format!("{key}:new"), new.as_deref());
+        app.images = Some((key, a, b));
+    }
+    let Some((_, old, new)) = &app.images else { return };
+    let w = (ui.available_width() - 30.0) / 2.0;
+    ui.add_space(10.0);
+    ui.horizontal_top(|ui| {
+        for (title, tex, color) in [("Before", old, t.removed), ("After", new, t.added)] {
+            ui.vertical(|ui| {
+                ui.set_width(w);
+                ui.label(RichText::new(title).strong().color(color));
+                match tex {
+                    Some(tx) => {
+                        let s = tx.size_vec2();
+                        let scale = (w / s.x).min(1.0).min(600.0 / s.y.max(1.0));
+                        ui.add(egui::Image::new(tx).fit_to_exact_size(s * scale));
+                        ui.label(RichText::new(format!("{} × {} px", s.x as u32, s.y as u32)).small().color(t.dim));
+                    }
+                    None => {
+                        ui.label(RichText::new("(none)").weak());
+                    }
+                }
+            });
+        }
+    });
 }
 
 fn blame(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(&'static str, Value)>) {

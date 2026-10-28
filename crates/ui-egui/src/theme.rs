@@ -70,6 +70,14 @@ pub struct Tokens {
     pub danger: Color32,
     pub hunk_bg: Color32,
     pub picked_bg: Color32,
+    /// The words that changed within a removed or added line.
+    pub removed_word_bg: Color32,
+    pub added_word_bg: Color32,
+    pub syn_keyword: Color32,
+    pub syn_type: Color32,
+    pub syn_string: Color32,
+    pub syn_comment: Color32,
+    pub syn_number: Color32,
 }
 
 impl Tokens {
@@ -94,6 +102,13 @@ impl Tokens {
         danger: Color32::from_rgb(0xC9, 0x2A, 0x2A),
         hunk_bg: Color32::from_rgb(0xEC, 0xEE, 0xF5),
         picked_bg: Color32::from_rgb(0xD6, 0xCC, 0xFA),
+        removed_word_bg: Color32::from_rgb(0xF5, 0xB8, 0xB8),
+        added_word_bg: Color32::from_rgb(0xAC, 0xE3, 0xB6),
+        syn_keyword: Color32::from_rgb(0x8B, 0x2F, 0xC9),
+        syn_type: Color32::from_rgb(0x0B, 0x6E, 0x99),
+        syn_string: Color32::from_rgb(0x2B, 0x7A, 0x0B),
+        syn_comment: Color32::from_rgb(0x7A, 0x80, 0x8E),
+        syn_number: Color32::from_rgb(0xB3, 0x5C, 0x00),
     };
     pub const DARK: Tokens = Tokens {
         dark: true,
@@ -116,6 +131,13 @@ impl Tokens {
         danger: Color32::from_rgb(0xF0, 0x71, 0x71),
         hunk_bg: Color32::from_rgb(0x26, 0x28, 0x34),
         picked_bg: Color32::from_rgb(0x4A, 0x3D, 0x80),
+        removed_word_bg: Color32::from_rgb(0x6B, 0x2C, 0x30),
+        added_word_bg: Color32::from_rgb(0x2B, 0x5C, 0x36),
+        syn_keyword: Color32::from_rgb(0xC7, 0x92, 0xEA),
+        syn_type: Color32::from_rgb(0x6C, 0xC4, 0xE8),
+        syn_string: Color32::from_rgb(0xA5, 0xD6, 0x7F),
+        syn_comment: Color32::from_rgb(0x82, 0x88, 0x99),
+        syn_number: Color32::from_rgb(0xF2, 0xA4, 0x6B),
     };
 
     pub fn get(ctx: &egui::Context) -> Tokens {
