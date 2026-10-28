@@ -16,8 +16,9 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
 5. ~~Graph controls~~ — landed: `graph.solo`, `graph.hide`, `graph.showAll`, `graph.refs` (remote branches and
    tags on or off), `graph.columns`, `diff.compare` (two commits, or a commit and the working tree;
    Mod-click a second commit), author highlighting, an overview strip, `ui.zoom`.
-6. **Identity and signing** — `config.identity` (user.name / email per repo), `commit.sign`,
-   `commit.noVerify`, `commit.template`.
+6. ~~Identity and signing~~ — landed: `config.identity` (this repository or every one), `config.signing`
+   (OpenPGP, SSH or X.509 keys), `commit.sign`, `commit.noVerify`, `commit.template`, `commit.coAuthors`,
+   `ssh.keys` / `ssh.generate`.
 7. **Submodules and worktrees** — `submodule.list`, `worktree.list`.
 8. **Tools** — `file.ignore`, `patch.create`, `patch.apply`, `lfs.track`, `gitflow.init`, `hooks.list`,
    `ui.terminal`, `file.edit`.

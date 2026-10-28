@@ -98,6 +98,10 @@ Commit Panel|Commit|Sign Commits|commit.sign
 Commit Panel|Commit|Commit Template|commit.template
 Commit Panel|Commit|Generate Commit Message|commit.generateMessage
 Commit Panel|Commit|Skip Hooks|commit.noVerify
+Commit Panel|Commit|Co-authors|commit.coAuthors
+Settings|Preferences|Commit Signing Settings|config.signing
+Settings|Preferences|SSH Keys|ssh.keys
+Settings|Preferences|Generate SSH Key|ssh.generate
 Diff View|Changes|Open File Diff|file.select
 Diff View|Changes|Close Diff|file.close
 Diff View|Changes|Hunk, Inline and Split Views|view.diffMode
@@ -233,7 +237,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 109;
+    const FLOOR: usize = 117;
 
     #[test]
     fn parity_floor() {

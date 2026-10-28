@@ -105,6 +105,10 @@ fn every_view_lays_out() {
         "remote.add",
         "stash.save",
         "rebase.interactive",
+        "config.identity",
+        "config.signing",
+        "ssh.keys",
+        "commit.coAuthors",
         "shortcuts",
         "preferences",
     ] {

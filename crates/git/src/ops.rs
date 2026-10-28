@@ -26,6 +26,16 @@ fn parse_ident(v: &str) -> Option<(String, String, String)> {
     Some((name, email, date))
 }
 
+/// How [`Repo::commit_with`] commits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CommitOptions {
+    pub amend: bool,
+    /// Sign (`Some(true)`), don't (`Some(false)`), or as `commit.gpgSign` says (`None`).
+    pub sign: Option<bool>,
+    /// Skip the pre-commit and commit-msg hooks.
+    pub no_verify: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResetMode {
     /// Move the branch; keep the index and work tree.
@@ -174,6 +184,11 @@ impl Repo {
 
     /// Commit the index with `message`; the new commit's id.
     pub fn commit(&self, message: &str, amend: bool) -> Result<String> {
+        self.commit_with(message, &CommitOptions { amend, ..CommitOptions::default() })
+    }
+
+    /// [`Repo::commit`] with signing and hook choices.
+    pub fn commit_with(&self, message: &str, o: &CommitOptions) -> Result<String> {
         if message.trim().is_empty() {
             return Err(GitError::Arg("the commit message is empty".into()));
         }
@@ -181,8 +196,16 @@ impl Repo {
             return Err(GitError::Arg("the commit message is too long".into()));
         }
         let mut args = vec!["commit", "-q", "--cleanup=strip", "-F", "-"];
-        if amend {
+        if o.amend {
             args.push("--amend");
+        }
+        match o.sign {
+            Some(true) => args.push("--gpg-sign"),
+            Some(false) => args.push("--no-gpg-sign"),
+            None => {}
+        }
+        if o.no_verify {
+            args.push("--no-verify");
         }
         self.run_input(&args, message.as_bytes())?;
         self.resolve("HEAD").ok_or_else(|| GitError::Parse("no HEAD after commit".into()))

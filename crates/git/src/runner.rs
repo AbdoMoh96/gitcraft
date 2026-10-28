@@ -266,4 +266,87 @@ impl Repo {
         let o = self.run(&["config", "--get", key]).ok()?;
         o.ok().then(|| o.text().trim().to_string())
     }
+
+    /// Every config value whose key matches the regular expression `pattern` (keys lower-cased by
+    /// git), in one run; the last value of a key wins.
+    pub fn config_matching(&self, pattern: &str) -> std::collections::HashMap<String, String> {
+        let mut out = std::collections::HashMap::new();
+        if pattern.starts_with('-') || pattern.contains(['\0', '\n']) {
+            return out;
+        }
+        let Ok(o) = self.run(&["config", "-z", "--get-regexp", pattern]) else { return out };
+        for rec in String::from_utf8_lossy(&o.stdout).split('\0') {
+            if let Some((k, v)) = rec.split_once('\n') {
+                out.insert(k.to_string(), v.to_string());
+            } else if !rec.is_empty() {
+                out.insert(rec.to_string(), String::new());
+            }
+        }
+        out
+    }
+
+    /// A config value from one scope only (`local`, `global`), if set there.
+    pub fn config_in(&self, scope: ConfigScope, key: &str) -> Option<String> {
+        let key = check_config_key(key).ok()?;
+        let o = self.run(&["config", scope.flag(), "--get", key]).ok()?;
+        o.ok().then(|| o.text().trim().to_string())
+    }
+
+    /// Set (or with `None` remove) a config value in `scope`.
+    pub fn set_config(&self, scope: ConfigScope, key: &str, value: Option<&str>) -> Result<()> {
+        let key = check_config_key(key)?;
+        match value {
+            Some(v) => {
+                if v.len() > 4096 || v.contains(['\0', '\n', '\r']) {
+                    return Err(GitError::Arg(format!("`{key}` can't hold that value")));
+                }
+                // `--` so a value starting with `-` is a value.
+                self.run_ok(&["config", scope.flag(), "--", key, v])?;
+            }
+            None => {
+                let o = self.run(&["config", scope.flag(), "--unset-all", key])?;
+                // 5: it wasn't set.
+                if !o.ok() && o.code != Some(5) {
+                    return Err(failed(&["config", "--unset-all", key], &o));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Which config file a setting is read from or written to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigScope {
+    /// This repository (`.git/config`).
+    Local,
+    /// The user's (`~/.gitconfig`).
+    Global,
+}
+
+impl ConfigScope {
+    pub fn parse(s: &str) -> Option<ConfigScope> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "local" | "repository" | "repo" => Some(ConfigScope::Local),
+            "global" | "user" => Some(ConfigScope::Global),
+            _ => None,
+        }
+    }
+    fn flag(self) -> &'static str {
+        match self {
+            ConfigScope::Local => "--local",
+            ConfigScope::Global => "--global",
+        }
+    }
+}
+
+/// `section.name` or `section.sub.name`: letters, digits, `-`, `.` (and anything in a subsection
+/// but line breaks); never an option.
+pub fn check_config_key(key: &str) -> Result<&str> {
+    let k = crate::check_name("config key", key)?;
+    let ok = k.contains('.')
+        && k.split('.').next().is_some_and(|sec| !sec.is_empty() && sec.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        && k.rsplit('.').next().is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    if ok { Ok(k) } else { Err(GitError::Arg(format!("`{k}` is not a config key"))) }
 }

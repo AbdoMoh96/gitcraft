@@ -172,20 +172,40 @@ impl Default for ViewState {
 
 /// The commit message being written in the commit panel.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CommitDraft {
     pub summary: String,
     pub description: String,
     pub amend: bool,
+    /// Sign the commit (`None`: as `commit.gpgSign` says).
+    pub sign: Option<bool>,
+    /// Skip the pre-commit and commit-msg hooks.
+    pub no_verify: bool,
+    /// `Name <email>` of people who wrote it too (`Co-authored-by:` trailers).
+    pub co_authors: Vec<String>,
 }
 
 impl CommitDraft {
     pub fn message(&self) -> String {
         let s = self.summary.trim();
         let d = self.description.trim();
-        if d.is_empty() { s.to_string() } else { format!("{s}\n\n{d}") }
+        let mut m = if d.is_empty() { s.to_string() } else { format!("{s}\n\n{d}") };
+        let trailers: Vec<String> = self
+            .co_authors
+            .iter()
+            .map(|a| a.trim())
+            .filter(|a| !a.is_empty() && !m.contains(&format!("Co-authored-by: {a}")))
+            .map(|a| format!("Co-authored-by: {a}"))
+            .collect();
+        if !trailers.is_empty() && !s.is_empty() {
+            m.push_str("\n\n");
+            m.push_str(&trailers.join("\n"));
+        }
+        m
     }
+    /// Forget the message; the signing and hook choices stay for the next commit.
     pub fn clear(&mut self) {
-        *self = CommitDraft::default();
+        *self = CommitDraft { sign: self.sign, no_verify: self.no_verify, ..CommitDraft::default() };
     }
 }
 
@@ -205,6 +225,8 @@ pub struct RepoData {
     pub labels: HashMap<String, Vec<usize>>,
     /// More commits exist than were loaded.
     pub more: bool,
+    /// Settings the views read (`user.name`, `commit.gpgsign`, …), loaded with the rest.
+    pub config: HashMap<String, String>,
 }
 
 impl RepoData {
@@ -222,6 +244,20 @@ impl RepoData {
     }
     pub fn head_ref(&self) -> Option<&Ref> {
         self.refs.iter().find(|r| r.head)
+    }
+}
+
+/// The settings loaded with each reload (see [`RepoData::config`]).
+const CONFIG_KEYS: &str = r"^(user\.(name|email|signingkey)|commit\.(gpgsign|template)|gpg\.format|gitcraft\..*|gitflow\..*)$";
+
+impl RepoData {
+    /// A loaded setting (key in lower case).
+    pub fn setting(&self, key: &str) -> Option<&str> {
+        self.config.get(&key.to_ascii_lowercase()).map(String::as_str)
+    }
+    /// Commits are signed unless a commit says otherwise.
+    pub fn signs_by_default(&self) -> bool {
+        self.setting("commit.gpgsign").is_some_and(|v| matches!(v, "true" | "yes" | "on" | "1"))
     }
 }
 
@@ -377,7 +413,8 @@ impl Session {
         }
         let stashes = repo.stashes().unwrap_or_default();
         let remotes = repo.remotes().unwrap_or_default();
-        self.data = RepoData { status, refs, commits, graph, stashes, remotes, row_of, labels, more };
+        let config = repo.config_matching(CONFIG_KEYS);
+        self.data = RepoData { status, refs, commits, graph, stashes, remotes, row_of, labels, more, config };
         self.fix_selection();
         Ok(())
     }

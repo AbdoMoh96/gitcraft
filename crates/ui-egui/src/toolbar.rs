@@ -160,6 +160,18 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
             }
         }
         ui.separator();
+        if app.session.repo.is_some() {
+            for (name, label) in [("config.identity", "Author Identity…"), ("config.signing", "Commit Signing…")] {
+                if ui.button(label).clicked() {
+                    app.dialog = Dialog::named(name, &app.session, &json!({}));
+                    ui.close();
+                }
+            }
+        }
+        if ui.button("SSH Keys…").clicked() {
+            app.dialog = Dialog::named("ssh.keys", &app.session, &json!({}));
+            ui.close();
+        }
         if ui.button("Preferences…").clicked() {
             app.dialog = Some(Dialog::Preferences);
             ui.close();

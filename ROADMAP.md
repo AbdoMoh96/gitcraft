@@ -13,6 +13,13 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M3.** Who commits and how: Author Identity (`config.identity`, for this repository or
+  every repository), Commit Signing (`config.signing`: GPG, SSH or X.509 key, sign commits and tags by
+  default), SSH Keys (`ssh.keys`: copy a public key; `ssh.generate`: a new ed25519 key with
+  `ssh-keygen`, never overwriting one). The commit form has Sign (`commit.sign`), Skip hooks
+  (`commit.noVerify`), Co-authors (`commit.coAuthors`: picked from the history's authors, written as
+  `Co-authored-by:` trailers) and Template (`commit.template`). Settings the views need are loaded
+  with each reload in one `git config --get-regexp` run.
 - **2026-10-28 — M4.** Graph controls: Solo and Hide a branch (`graph.solo`, `graph.hide`, from a
   branch's menu; the header shows the filter with Show all), remote branches and tags on or off and
   the Branch / Author / Date / Commit columns (right-click the graph header: `graph.refs`,

@@ -389,6 +389,28 @@ fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Opt
         app.session.draft.summary = summary;
         app.session.draft.description = desc;
     }
+    // Signing, hooks, co-authors and the template.
+    ui.horizontal_wrapped(|ui| {
+        let default_sign = app.session.data.signs_by_default();
+        let mut sign = app.session.draft.sign.unwrap_or(default_sign);
+        if ui.checkbox(&mut sign, "Sign").on_hover_text("Sign this commit with your key (Commit Signing in the repository menu)").changed() {
+            *run = Some(("commit.sign", json!({"value": sign})));
+        }
+        let mut skip = app.session.draft.no_verify;
+        if ui.checkbox(&mut skip, "Skip hooks").on_hover_text("Don't run the pre-commit and commit-msg hooks").changed() {
+            *run = Some(("commit.noVerify", json!({"value": skip})));
+        }
+        let n = app.session.draft.co_authors.len();
+        let label = if n == 0 { "Co-authors…".to_string() } else { format!("Co-authors ({n})…") };
+        if ui.small_button(label).clicked() {
+            app.dialog = Dialog::named("commit.coAuthors", &app.session, &json!({}));
+        }
+        if app.session.data.setting("commit.template").is_some()
+            && ui.small_button("Template").on_hover_text("Fill an empty message from the commit template").clicked()
+        {
+            *run = Some(("commit.template", json!({})));
+        }
+    });
     let merging = app.session.data.status.state == RepoState::Merging;
     let can = (staged > 0 || app.session.draft.amend || merging) && (!app.session.draft.summary.trim().is_empty() || merging);
     let label = if app.session.draft.amend {

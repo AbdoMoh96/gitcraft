@@ -67,6 +67,34 @@ pub enum Dialog {
         oid: String,
         rows: Vec<RebaseRow>,
     },
+    /// The author identity for this repository and for every repository.
+    Identity {
+        local_name: String,
+        local_email: String,
+        global_name: String,
+        global_email: String,
+    },
+    /// How commits are signed.
+    Signing {
+        global: bool,
+        format: String,
+        key: String,
+        sign_commits: bool,
+        sign_tags: bool,
+    },
+    /// The user's SSH keys, and making a new one.
+    SshKeys {
+        keys: Vec<(String, String)>,
+        name: String,
+        comment: String,
+        passphrase: String,
+    },
+    /// People credited as co-authors of the next commit.
+    CoAuthors {
+        known: Vec<String>,
+        chosen: Vec<String>,
+        custom: String,
+    },
     Shortcuts,
     Preferences,
 }
@@ -122,6 +150,46 @@ impl Dialog {
                     .collect();
                 Dialog::Rebase { oid, rows }
             }
+            "config.identity" => {
+                let r = s.repo.as_ref()?;
+                let get = |sc, k| r.config_in(sc, k).unwrap_or_default();
+                use gitcraft_engine::git::ConfigScope::{Global, Local};
+                Dialog::Identity {
+                    local_name: get(Local, "user.name"),
+                    local_email: get(Local, "user.email"),
+                    global_name: get(Global, "user.name"),
+                    global_email: get(Global, "user.email"),
+                }
+            }
+            "config.signing" => {
+                let r = s.repo.as_ref()?;
+                Dialog::Signing {
+                    global: true,
+                    format: r.config("gpg.format").unwrap_or_else(|| "openpgp".into()),
+                    key: r.config("user.signingkey").unwrap_or_default(),
+                    sign_commits: r.config("commit.gpgsign").is_some_and(|x| x == "true"),
+                    sign_tags: r.config("tag.gpgsign").is_some_and(|x| x == "true"),
+                }
+            }
+            "ssh.keys" => Dialog::SshKeys {
+                keys: gitcraft_engine::git::ssh::ssh_dir()
+                    .map(|d| gitcraft_engine::git::ssh::list_keys(&d).into_iter().map(|k| (k.path, k.public)).collect())
+                    .unwrap_or_default(),
+                name: "id_ed25519".into(),
+                comment: s.repo.as_ref().and_then(|r| r.config("user.email")).unwrap_or_default(),
+                passphrase: String::new(),
+            },
+            "commit.coAuthors" => {
+                let me = s.repo.as_ref().and_then(|r| r.config("user.email")).unwrap_or_default();
+                let mut known: Vec<String> = Vec::new();
+                for c in s.data.commits.iter().take(5000) {
+                    let a = format!("{} <{}>", c.author.name, c.author.email);
+                    if c.author.email != me && !known.contains(&a) && known.len() < 200 {
+                        known.push(a);
+                    }
+                }
+                Dialog::CoAuthors { known, chosen: s.draft.co_authors.clone(), custom: String::new() }
+            }
             "shortcuts" | "ui.shortcuts" => Dialog::Shortcuts,
             "preferences" | "ui.preferences" => Dialog::Preferences,
             _ => return None,
@@ -145,6 +213,10 @@ impl Dialog {
             Dialog::Confirm { .. } => "confirm",
             Dialog::Diverged { .. } => "diverged",
             Dialog::Rebase { .. } => "rebase.interactive",
+            Dialog::Identity { .. } => "config.identity",
+            Dialog::Signing { .. } => "config.signing",
+            Dialog::SshKeys { .. } => "ssh.keys",
+            Dialog::CoAuthors { .. } => "commit.coAuthors",
             Dialog::Shortcuts => "shortcuts",
             Dialog::Preferences => "preferences",
         }
@@ -452,6 +524,133 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
         }
         Dialog::Rebase { oid, rows } => return rebase_body(ui, oid, rows, t),
+        Dialog::Identity { local_name, local_email, global_name, global_email } => {
+            ui.heading("Author Identity");
+            ui.label(RichText::new("The name and e-mail address your commits are made with.").small().color(t.dim));
+            ui.add_space(6.0);
+            ui.label(RichText::new("THIS REPOSITORY (overrides the one below; leave empty to use it)").small().strong());
+            field(ui, "NAME", local_name, global_name, first);
+            field(ui, "E-MAIL", local_email, global_email, false);
+            ui.add_space(4.0);
+            ui.label(RichText::new("EVERY REPOSITORY").small().strong());
+            field(ui, "NAME", global_name, "Your Name", false);
+            field(ui, "E-MAIL", global_email, "you@example.com", false);
+            let valid = |e: &str| e.trim().is_empty() || (e.contains('@') && !e.contains(['<', '>']));
+            let ok = valid(local_email) && valid(global_email);
+            let (save, cancel) = buttons(ui, "Save", ok, false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if save {
+                let _ = app.run("config.identity", json!({"scope": "global", "name": global_name.trim(), "email": global_email.trim()}));
+                return Close::Run("config.identity".into(), json!({"scope": "local", "name": local_name.trim(), "email": local_email.trim()}));
+            }
+        }
+        Dialog::Signing { global, format, key, sign_commits, sign_tags } => {
+            ui.heading("Commit Signing");
+            ui.add_space(6.0);
+            ui.label(RichText::new("KEY FORMAT").small().strong());
+            ui.horizontal(|ui| {
+                for (f, label) in [("openpgp", "GPG (OpenPGP)"), ("ssh", "SSH"), ("x509", "X.509")] {
+                    ui.radio_value(format, f.to_string(), label);
+                }
+            });
+            let hint = match format.as_str() {
+                "ssh" => "~/.ssh/id_ed25519.pub, or the key itself",
+                "x509" => "certificate id",
+                _ => "key id (gpg --list-secret-keys --keyid-format long)",
+            };
+            field(ui, "SIGNING KEY", key, hint, first);
+            ui.checkbox(sign_commits, "Sign every commit by default");
+            ui.checkbox(sign_tags, "Sign every annotated tag by default");
+            ui.checkbox(global, "For every repository (otherwise only this one)");
+            let (save, cancel) = buttons(ui, "Save", true, false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if save {
+                return Close::Run(
+                    "config.signing".into(),
+                    json!({"scope": if *global { "global" } else { "local" }, "format": format, "key": key.trim(), "signCommits": *sign_commits, "signTags": *sign_tags}),
+                );
+            }
+        }
+        Dialog::SshKeys { keys, name, comment, passphrase } => {
+            ui.heading("SSH Keys");
+            ui.add_space(6.0);
+            if keys.is_empty() {
+                ui.label(RichText::new("No SSH keys yet.").weak());
+            }
+            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                for (path, public) in keys.iter() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(path.as_str()).monospace().small());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Copy Public Key").on_hover_text("Paste it into your hosting service's SSH keys").clicked() {
+                                app.copy(public.clone());
+                            }
+                        });
+                    });
+                }
+            });
+            ui.separator();
+            ui.label(RichText::new("NEW KEY (ed25519)").small().strong());
+            field(ui, "FILE NAME IN ~/.ssh", name, "id_ed25519", false);
+            field(ui, "COMMENT", comment, "you@example.com", false);
+            ui.label(RichText::new("PASSPHRASE (optional)").small().strong());
+            ui.add(egui::TextEdit::singleline(passphrase).password(true).desired_width(f32::INFINITY));
+            let exists = keys.iter().any(|(p, _)| p.ends_with(&format!("/{}", name.trim())) || p.ends_with(&format!("\\{}", name.trim())));
+            if exists {
+                ui.label(RichText::new("A key with that name exists.").small().color(t.warning));
+            }
+            let (ok, cancel) = buttons(ui, "Generate Key", !name.trim().is_empty() && !exists, false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                let r = app.run("ssh.generate", json!({"name": name.trim(), "comment": comment.trim(), "passphrase": passphrase}));
+                passphrase.clear();
+                if r.is_ok()
+                    && let Some(Dialog::SshKeys { keys: k, .. }) = Dialog::named("ssh.keys", &app.session, &json!({}))
+                {
+                    *keys = k;
+                }
+            }
+        }
+        Dialog::CoAuthors { known, chosen, custom } => {
+            ui.heading("Co-authors");
+            ui.label(RichText::new("Credited with Co-authored-by lines in the next commit.").small().color(t.dim));
+            ui.add_space(6.0);
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                let mut all: Vec<String> = chosen.clone();
+                all.extend(known.iter().filter(|k| !chosen.contains(k)).cloned());
+                for a in all {
+                    let mut on = chosen.contains(&a);
+                    if ui.checkbox(&mut on, a.as_str()).changed() {
+                        if on {
+                            chosen.push(a.clone());
+                        } else {
+                            chosen.retain(|x| *x != a);
+                        }
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(custom).hint_text("Name <email>").desired_width(330.0));
+                let ok = custom.contains('<') && custom.trim().ends_with('>');
+                if ui.add_enabled(ok, egui::Button::new("Add")).clicked() {
+                    chosen.push(custom.trim().to_string());
+                    custom.clear();
+                }
+            });
+            let (ok, cancel) = buttons(ui, "Done", true, false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("commit.coAuthors".into(), json!({"authors": chosen}));
+            }
+        }
         Dialog::Shortcuts => {
             ui.heading("Keyboard Shortcuts");
             ui.add_space(6.0);

@@ -2,6 +2,7 @@
 
 pub mod branch;
 pub mod commit;
+pub mod config;
 pub mod conflict;
 pub mod edit;
 pub mod history;
@@ -35,6 +36,7 @@ pub fn registry() -> Registry {
     v.extend(stash::specs());
     v.extend(conflict::specs());
     v.extend(inspect::specs());
+    v.extend(config::specs());
     Registry::new(v)
 }
 

@@ -278,8 +278,8 @@ fn hostile_params_never_panic() {
         json!({"name": "a\nb", "summary": "\0", "message": "\u{202e}", "oid": "zzzzzzz"}),
         json!({"name": "", "to": "", "from": "", "upstream": ""}),
     ];
-    // These would touch folders outside the test repository.
-    let skip = ["repo.open", "repo.init", "repo.clone"];
+    // These would touch folders outside the test repository (ssh.generate writes to ~/.ssh).
+    let skip = ["repo.open", "repo.init", "repo.clone", "ssh.generate"];
     let (_d, mut s) = session("eng-hostile");
     let repo = s.repo().unwrap().clone();
     let ids: Vec<&'static str> = s.registry.all().iter().map(|c| c.id).collect();
@@ -299,7 +299,7 @@ fn hostile_params_never_panic() {
         }
     }
     // The safe junk for the commands that create or open folders.
-    for id in skip {
+    for id in skip.iter().filter(|i| **i != "ssh.generate") {
         for p in [json!({}), json!({"path": 5}), json!({"url": "--upload-pack=touch x", "path": ""})] {
             if let Err(e) = s.run(id, &p) {
                 assert!(!e.to_string().contains("internal error"), "{id} {p}: {e}");
@@ -540,4 +540,54 @@ fn solo_hide_columns_and_compare() {
     assert!(s.sel.file.is_none() && s.view.compare.is_none());
     assert!(s.run("diff.compare", &json!({"from": "HEAD", "to": "HEAD"})).is_err());
     assert!(s.run("file.select", &json!({"path": "x", "area": "compare"})).is_err());
+}
+
+#[test]
+fn identity_signing_template_and_commit_options() {
+    let (_d, mut s) = session("eng-config");
+    let repo = s.repo().unwrap().clone();
+    let r = run(&mut s, "config.identity", json!({"name": "Grace Hopper", "email": "grace@example.com"}));
+    assert_eq!(r["local"]["name"], json!("Grace Hopper"));
+    assert_eq!(r["effective"]["email"], json!("grace@example.com"));
+    run(&mut s, "config.identity", json!({"scope": "global", "name": "-Global Name"}));
+    assert_eq!(repo.config_in(gitcraft_git::ConfigScope::Global, "user.name").as_deref(), Some("-Global Name"));
+    assert!(s.run("config.identity", &json!({"email": "not-an-address"})).is_err());
+    run(&mut s, "config.identity", json!({"name": ""}));
+    assert_eq!(repo.config_in(gitcraft_git::ConfigScope::Local, "user.name"), None);
+    // Signing settings round-trip; a commit can opt out of signing.
+    let r = run(&mut s, "config.signing", json!({"format": "ssh", "key": "~/.ssh/id_ed25519.pub", "signCommits": false}));
+    assert_eq!(r["format"], json!("ssh"));
+    assert!(s.run("config.signing", &json!({"format": "pgp2"})).is_err());
+    assert_eq!(run(&mut s, "commit.sign", json!({}))["value"], json!(true));
+    run(&mut s, "commit.sign", json!({"value": false}));
+    run(&mut s, "commit.noVerify", json!({"value": true}));
+    // A failing pre-commit hook is skipped.
+    let hooks = repo.git_dir().join("hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    std::fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(hooks.join("pre-commit"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    run(&mut s, "commit.coAuthors", json!({"authors": ["Ada Lovelace <ada@example.org>"]}));
+    assert!(s.run("commit.coAuthors", &json!({"authors": ["no address"]})).is_err());
+    write(&repo, "x.txt", "x\n").unwrap();
+    let r = run(&mut s, "commit.stageAllAndCommit", json!({"summary": "With a hook"}));
+    let c = repo.find_commit(r["oid"].as_str().unwrap()).unwrap();
+    assert!(c.body.contains("Co-authored-by: Ada Lovelace <ada@example.org>"), "{}", c.body);
+    assert!(s.draft.no_verify && s.draft.co_authors.is_empty(), "choices stay, co-authors go");
+    #[cfg(unix)]
+    {
+        run(&mut s, "commit.noVerify", json!({"value": false}));
+        write(&repo, "y.txt", "y\n").unwrap();
+        assert!(s.run("commit.stageAllAndCommit", &json!({"summary": "Blocked"})).is_err(), "the hook runs again");
+    }
+    // A commit template fills an empty message.
+    std::fs::write(repo.root().join(".tmpl"), "# comment\nfeat: \n\nWhy:\n").unwrap();
+    let r = run(&mut s, "commit.template", json!({"path": ".tmpl"}));
+    assert_eq!(r["draft"]["summary"], json!("feat:"));
+    assert_eq!(s.draft.description, "Why:");
+    assert!(run(&mut s, "ssh.keys", json!({}))["keys"].is_array());
+    assert!(s.run("ssh.generate", &json!({"name": "../x"})).is_err());
 }
