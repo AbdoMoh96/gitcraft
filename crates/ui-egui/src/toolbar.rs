@@ -133,6 +133,31 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
             app.dialog = Dialog::named("repo.init", &app.session, &json!({}));
             ui.close();
         }
+        if ui.button("Find Repositories…").clicked() {
+            app.dialog = Dialog::named("repo.scan", &app.session, &json!({}));
+            ui.close();
+        }
+        ui.separator();
+        if ui.button("Workspaces…").clicked() {
+            app.dialog = Dialog::named("ui.workspaces", &app.session, &json!({}));
+            ui.close();
+        }
+        if !app.prefs.workspaces.is_empty() {
+            ui.menu_button("Open Workspace", |ui| {
+                for w in app.prefs.workspaces.clone() {
+                    if ui.button(&w.name).clicked() {
+                        let _ = app.ui_command("ui.workspaces", &json!({"action": "open", "name": w.name}));
+                        ui.close();
+                    }
+                }
+            });
+        }
+        let profile =
+            if app.prefs.active_profile.is_empty() { "Profiles…".to_string() } else { format!("Profile: {}…", app.prefs.active_profile) };
+        if ui.button(profile).clicked() {
+            app.dialog = Dialog::named("ui.profile", &app.session, &json!({}));
+            ui.close();
+        }
         if !app.prefs.favorites.is_empty() {
             ui.separator();
             ui.label(RichText::new("FAVOURITES").small().weak());

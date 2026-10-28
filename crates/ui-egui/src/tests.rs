@@ -118,6 +118,9 @@ fn every_view_lays_out() {
         "hooks.list",
         "stash.rename",
         "remote.editUrl",
+        "ui.workspaces",
+        "ui.profile",
+        "repo.scan",
         "shortcuts",
         "preferences",
     ] {
@@ -272,4 +275,33 @@ fn drag_a_tab_to_reorder() {
     frame(&mut a, vec![]);
     assert_eq!(a.tabs.active, 0);
     assert_eq!(a.session.repo().unwrap().root(), r2.root());
+}
+
+#[test]
+fn workspaces_and_profiles() {
+    let (d, mut a) = app("ui-workspaces");
+    let (_d2, other) = sample("ui-workspaces-2").unwrap();
+    a.open_repo(other.root()).unwrap();
+    assert_eq!(a.tabs.len(), 2);
+    a.ui_command("ui.workspaces", &json!({"action": "save", "name": "both"})).unwrap();
+    a.close_all_tabs();
+    assert!(a.session.repo.is_none());
+    a.ui_command("ui.workspaces", &json!({"action": "open", "name": "both"})).unwrap();
+    assert_eq!(a.tabs.len(), 2);
+    assert!(a.ui_command("ui.workspaces", &json!({"action": "open", "name": "nope"})).is_err());
+    // A profile with its own author: commits use it, and its tabs come back with it.
+    a.ui_command("ui.profile", &json!({"action": "save", "name": "Work", "gitName": "Grace Work", "gitEmail": "grace@work.example"})).unwrap();
+    a.ui_command("ui.profile", &json!({"action": "switch", "name": "Work"})).unwrap();
+    assert!(a.session.repo.is_none(), "a new profile starts with no tabs");
+    a.open_repo(other.root()).unwrap();
+    write(a.session.repo().unwrap(), "w.txt", "w\n").unwrap();
+    a.run("commit.stageAllAndCommit", json!({"summary": "At work"})).unwrap();
+    assert_eq!(a.session.repo().unwrap().find_commit("HEAD").unwrap().author.email, "grace@work.example");
+    a.ui_command("ui.profile", &json!({"action": "switch", "name": ""})).unwrap();
+    assert_eq!(a.tabs.len(), 2, "the first profile's tabs");
+    assert!(a.ui_command("ui.profile", &json!({"action": "save", "name": "Bad", "gitEmail": "nope"})).is_err());
+    a.ui_command("ui.profile", &json!({"action": "switch", "name": "Work"})).unwrap();
+    assert_eq!(a.session.repo.as_ref().map(|r| r.root().to_path_buf()), Some(other.root().to_path_buf()));
+    assert!(a.ui_command("ui.profile", &json!({"action": "delete", "name": "Work"})).is_err(), "the active one");
+    let _ = d;
 }

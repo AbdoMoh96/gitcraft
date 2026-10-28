@@ -75,6 +75,21 @@ pub enum Dialog {
         index: usize,
         message: String,
     },
+    Workspaces {
+        name: String,
+    },
+    Profiles {
+        name: String,
+        git_name: String,
+        git_email: String,
+    },
+    /// Find repositories under a folder.
+    Scan {
+        path: String,
+        found: Vec<String>,
+        picked: Vec<String>,
+        workspace: String,
+    },
     EditRemote {
         name: String,
         new_name: String,
@@ -221,6 +236,9 @@ impl Dialog {
                 }
             }
             "hooks.list" => Dialog::Hooks { selected: String::new(), script: String::new() },
+            "ui.workspaces" | "workspaces" => Dialog::Workspaces { name: String::new() },
+            "ui.profile" | "profiles" => Dialog::Profiles { name: String::new(), git_name: String::new(), git_email: String::new() },
+            "repo.scan" => Dialog::Scan { path: st("path").unwrap_or_else(home), found: Vec::new(), picked: Vec::new(), workspace: String::new() },
             "stash.rename" => Dialog::RenameStash {
                 index: v.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
                 message: st("message").unwrap_or_default(),
@@ -299,6 +317,9 @@ impl Dialog {
             Dialog::Rebase { .. } => "rebase.interactive",
             Dialog::AddSubmodule { .. } => "submodule.add",
             Dialog::RenameStash { .. } => "stash.rename",
+            Dialog::Workspaces { .. } => "ui.workspaces",
+            Dialog::Profiles { .. } => "ui.profile",
+            Dialog::Scan { .. } => "repo.scan",
             Dialog::EditRemote { .. } => "remote.editUrl",
             Dialog::SavePatch { .. } => "patch.create",
             Dialog::ApplyPatch { .. } => "patch.apply",
@@ -637,6 +658,161 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
             if ok {
                 return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
+            }
+        }
+        Dialog::Workspaces { name } => {
+            ui.heading("Workspaces");
+            ui.label(RichText::new("Groups of repositories opened together, each in a tab.").small().color(t.dim));
+            ui.add_space(6.0);
+            let list = app.prefs.workspaces.clone();
+            if list.is_empty() {
+                ui.label(RichText::new("No workspaces yet: open the repositories you work on together, then save them.").weak());
+            }
+            for w in list {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&w.name).strong());
+                    ui.label(
+                        RichText::new(format!("{} repositor{}", w.repos.len(), if w.repos.len() == 1 { "y" } else { "ies" })).small().color(t.dim),
+                    )
+                    .on_hover_text(w.repos.join("\n"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Delete").clicked() {
+                            let _ = app.ui_command("ui.workspaces", &json!({"action": "delete", "name": w.name}));
+                        }
+                        if ui.small_button("Open").clicked() {
+                            let _ = app.ui_command("ui.workspaces", &json!({"action": "open", "name": w.name}));
+                        }
+                    });
+                });
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(name).hint_text("Workspace name").desired_width(240.0));
+                if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Save Open Tabs")).clicked() {
+                    match app.ui_command("ui.workspaces", &json!({"action": "save", "name": name.trim()})) {
+                        Ok(_) => name.clear(),
+                        Err(e) => app.status(e, true),
+                    }
+                }
+            });
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
+            }
+        }
+        Dialog::Profiles { name, git_name, git_email } => {
+            ui.heading("Profiles");
+            ui.label(
+                RichText::new("Each profile keeps its own open tabs and favourites, and can commit as a different author.").small().color(t.dim),
+            );
+            ui.add_space(6.0);
+            let active = app.prefs.active_profile.clone();
+            let mut pick: Option<String> = None;
+            ui.horizontal(|ui| {
+                if ui.radio(active.is_empty(), "No profile").clicked() {
+                    pick = Some(String::new());
+                }
+            });
+            for p in app.prefs.profiles.clone().into_iter().filter(|p| !p.name.is_empty()) {
+                ui.horizontal(|ui| {
+                    if ui.radio(active == p.name, p.name.as_str()).clicked() {
+                        pick = Some(p.name.clone());
+                    }
+                    let who = if p.git_email.is_empty() { "git's identity".to_string() } else { format!("{} <{}>", p.git_name, p.git_email) };
+                    ui.label(RichText::new(who).small().color(t.dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add_enabled(active != p.name, egui::Button::new("Delete").small()).clicked() {
+                            let _ = app.ui_command("ui.profile", &json!({"action": "delete", "name": p.name}));
+                        }
+                        if ui.small_button("Edit").clicked() {
+                            *name = p.name.clone();
+                            *git_name = p.git_name.clone();
+                            *git_email = p.git_email.clone();
+                        }
+                    });
+                });
+            }
+            if let Some(n) = pick {
+                let _ = app.ui_command("ui.profile", &json!({"action": "switch", "name": n}));
+                return Close::Cancel;
+            }
+            ui.separator();
+            ui.label(RichText::new("NEW OR EDITED PROFILE").small().strong());
+            field(ui, "NAME", name, "Work", false);
+            field(ui, "COMMIT AS (name)", git_name, "optional", false);
+            field(ui, "COMMIT AS (e-mail)", git_email, "optional", false);
+            if ui.add_enabled(!name.trim().is_empty(), egui::Button::new("Save Profile")).clicked() {
+                match app.ui_command(
+                    "ui.profile",
+                    &json!({"action": "save", "name": name.trim(), "gitName": git_name.trim(), "gitEmail": git_email.trim()}),
+                ) {
+                    Ok(_) => {
+                        name.clear();
+                        git_name.clear();
+                        git_email.clear();
+                    }
+                    Err(e) => app.status(e, true),
+                }
+            }
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
+            }
+        }
+        Dialog::Scan { path, found, picked, workspace } => {
+            ui.heading("Find Repositories");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(path).desired_width(300.0));
+                if let Some(pick) = &app.services.pick_folder
+                    && ui.button("Browse…").clicked()
+                    && let Some(p) = pick("Look for repositories in")
+                {
+                    *path = p.display().to_string();
+                }
+                if ui.button("Search").clicked() {
+                    match app.session.run("repo.scan", &json!({"path": path.trim()})) {
+                        Ok(v) => {
+                            *found = v["repositories"]
+                                .as_array()
+                                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                                .unwrap_or_default();
+                            picked.clear();
+                        }
+                        Err(e) => app.status(e.to_string(), true),
+                    }
+                }
+            });
+            ui.label(RichText::new("Looks three folders deep; hidden and build folders are skipped.").small().color(t.dim));
+            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                for f in found.iter() {
+                    ui.horizontal(|ui| {
+                        let mut on = picked.contains(f);
+                        if ui.checkbox(&mut on, "").changed() {
+                            if on {
+                                picked.push(f.clone());
+                            } else {
+                                picked.retain(|x| x != f);
+                            }
+                        }
+                        if ui.link(f.as_str()).on_hover_text("Open it").clicked() {
+                            let _ = app.open_repo(std::path::Path::new(f));
+                        }
+                    });
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!picked.is_empty(), egui::Button::new(format!("Open {} in Tabs", picked.len()))).clicked() {
+                    for p in picked.clone() {
+                        let _ = app.open_repo(std::path::Path::new(&p));
+                    }
+                }
+                ui.add(egui::TextEdit::singleline(workspace).hint_text("Workspace name").desired_width(150.0));
+                if ui.add_enabled(!picked.is_empty() && !workspace.trim().is_empty(), egui::Button::new("Save as Workspace")).clicked() {
+                    let _ = app.ui_command("ui.workspaces", &json!({"action": "save", "name": workspace.trim(), "repos": picked}));
+                    app.status(format!("Saved the {} workspace", workspace.trim()), false);
+                }
+            });
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
             }
         }
         Dialog::RenameStash { index, message } => {

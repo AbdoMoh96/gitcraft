@@ -31,8 +31,9 @@ Repository|Management|Close Repository|repo.close
 Repository|Management|Refresh|repo.refresh
 Repository|Management|Recent Repositories|ui.recent
 Repository|Management|Repository Tabs|ui.tabs
-Repository|Management|Workspaces|workspace.open
-Repository|Management|Profiles|profile.switch
+Repository|Management|Workspaces|ui.workspaces
+Repository|Management|Profiles|ui.profile
+Repository|Management|Find Repositories in a Folder|repo.scan
 Repository|Management|Author Identity|config.identity
 Graph|Navigation|Commit Graph|graph.select
 Graph|Navigation|Next Commit|graph.selectNext
@@ -107,6 +108,7 @@ Commit Panel|Staging|Unstage All Changes|unstage.all
 Commit Panel|Staging|Discard File Changes|discard.file
 Commit Panel|Staging|Discard All Changes|discard.all
 Commit Panel|Staging|Ignore File|file.ignore
+Commit Panel|Staging|Tree View|ui.treeView
 Commit Panel|Commit|Summary and Description|commit.message
 Commit Panel|Commit|Amend Previous Commit|commit.amend
 Commit Panel|Commit|Commit|commit.create
@@ -194,6 +196,9 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.pin",
     "ui.favorite",
     "ui.autoFetch",
+    "ui.workspaces",
+    "ui.profile",
+    "ui.treeView",
 ];
 
 pub struct Entry {
@@ -268,7 +273,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 150;
+    const FLOOR: usize = 154;
 
     #[test]
     fn parity_floor() {

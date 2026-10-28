@@ -50,6 +50,56 @@ fn refresh(s: &mut Session, _: &Value) -> CmdResult {
     super::done("Reloaded")
 }
 
+/// Folders scanned at most, and how deep.
+const MAX_SCANNED: usize = 20_000;
+const MAX_DEPTH: usize = 6;
+
+/// Folders under `root` (to `depth` levels) that are git repositories; hidden folders and build
+/// output are skipped, links aren't followed.
+pub fn scan(root: &std::path::Path, depth: usize) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut seen = 0usize;
+    while let Some((dir, d)) = stack.pop() {
+        seen += 1;
+        if seen > MAX_SCANNED {
+            break;
+        }
+        if dir.join(".git").exists() {
+            found.push(dir);
+            // A repository's own folders are its business (submodules are listed there).
+            continue;
+        }
+        if d >= depth {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let mut subs: Vec<PathBuf> = rd
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                !n.starts_with('.') && !matches!(n.as_str(), "node_modules" | "target" | "build" | "dist" | "vendor" | "Library" | "AppData")
+            })
+            .map(|e| e.path())
+            .collect();
+        subs.sort();
+        stack.extend(subs.into_iter().rev().map(|p| (p, d + 1)));
+    }
+    found.sort();
+    found
+}
+
+fn scan_cmd(_: &mut Session, v: &Value) -> CmdResult {
+    let root = PathBuf::from(p::req_str(v, "path")?.trim());
+    if !root.is_dir() {
+        return Err(crate::CmdError::Params(format!("{} is not a folder", root.display())));
+    }
+    let depth = p::usize(v, "depth").unwrap_or(3).clamp(1, MAX_DEPTH);
+    let repos: Vec<String> = scan(&root, depth).into_iter().map(|p| p.display().to_string()).collect();
+    Ok(json!({"message": format!("Found {} repositor{}", repos.len(), if repos.len() == 1 { "y" } else { "ies" }), "repositories": repos}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("repo.open", "Open Repository", "File", open).key("Mod+O").params(r#"{"path": string}"#).pure(),
@@ -58,6 +108,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(r#"{"url": string, "path"?: string (default: <into>/<name>), "into"?: string}"#)
             .pure()
             .slow(),
+        CommandSpec::new("repo.scan", "Find Repositories", "File", scan_cmd).params(r#"{"path": folder, "depth"?: 1–6 (3)}"#).pure(),
         CommandSpec::new("repo.close", "Close Repository", "File", close).key("Mod+W").pure().when(need_repo),
         CommandSpec::new("repo.refresh", "Refresh", "View", refresh).key("F5").pure().when(need_repo),
     ]

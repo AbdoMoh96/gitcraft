@@ -76,6 +76,34 @@ pub struct Prefs {
     pub favorites: Vec<String>,
     /// Fetch every N minutes while a repository is open (0: never).
     pub auto_fetch_minutes: u32,
+    /// Named groups of repositories opened together in tabs.
+    pub workspaces: Vec<Workspace>,
+    /// Sets of tabs, favourites and author identity to switch between.
+    pub profiles: Vec<Profile>,
+    /// The profile in use (empty: none).
+    pub active_profile: String,
+    /// The commit panel groups files by folder.
+    pub tree_view: bool,
+}
+
+/// A named group of repositories.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Workspace {
+    pub name: String,
+    pub repos: Vec<String>,
+}
+
+/// A profile: its own open tabs, favourites and commit identity.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Profile {
+    pub name: String,
+    /// Commits made in this profile use this author (empty: git's configuration).
+    pub git_name: String,
+    pub git_email: String,
+    pub tabs: Vec<String>,
+    pub favorites: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -96,6 +124,10 @@ impl Default for Prefs {
             pinned: Default::default(),
             favorites: Vec::new(),
             auto_fetch_minutes: 0,
+            workspaces: Vec::new(),
+            profiles: Vec::new(),
+            active_profile: String::new(),
+            tree_view: false,
         }
     }
 }
@@ -220,6 +252,27 @@ impl GitApp {
     pub fn new(session: Session, prefs: Prefs, services: Services) -> Self {
         let avatars = avatars::Avatars::new(services.avatar_cache.clone().filter(|_| prefs.gravatar));
         let mut s = session;
+        // The active profile's author.
+        if let Some(p) = prefs.profiles.iter().find(|p| p.name == prefs.active_profile && !prefs.active_profile.is_empty()) {
+            let keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+            if !p.git_name.is_empty() || !p.git_email.is_empty() {
+                s.git.env.retain(|(k, _)| !keys.contains(&k.as_str()));
+                for (k, v) in [
+                    ("GIT_AUTHOR_NAME", &p.git_name),
+                    ("GIT_COMMITTER_NAME", &p.git_name),
+                    ("GIT_AUTHOR_EMAIL", &p.git_email),
+                    ("GIT_COMMITTER_EMAIL", &p.git_email),
+                ] {
+                    if !v.is_empty() {
+                        s.git.env.push((k.into(), v.clone()));
+                    }
+                }
+                // A repository opened already runs its own git: open it again with the profile's.
+                if let Some(root) = s.repo.as_ref().map(|r| r.root().to_path_buf()) {
+                    let _ = s.open(&root);
+                }
+            }
+        }
         s.view.context = prefs.context_lines.min(100);
         s.view.commit_limit = prefs.commit_limit.clamp(100, 100_000);
         GitApp {
@@ -576,6 +629,12 @@ impl GitApp {
                 };
                 Ok(json!({"path": root.display().to_string(), "terminal": prog}))
             }
+            "ui.workspaces" => self.workspaces_command(v),
+            "ui.treeView" => {
+                self.prefs.tree_view = v.get("value").and_then(Value::as_bool).unwrap_or(!self.prefs.tree_view);
+                Ok(json!({"value": self.prefs.tree_view}))
+            }
+            "ui.profile" => self.profile_command(v),
             "ui.pin" => {
                 let name = s("name").ok_or("`name` is required")?.to_string();
                 if !self.session.data.local_branches().any(|r| r.name == name) {
@@ -929,6 +988,154 @@ impl GitApp {
 }
 
 impl GitApp {
+    /// Close every tab, leaving one empty.
+    pub fn close_all_tabs(&mut self) {
+        while self.tabs.len() > 1 {
+            if self.close_tab(self.tabs.len() - 1).is_err() {
+                break;
+            }
+        }
+        self.session.close();
+        self.sync_tab_prefs();
+    }
+
+    fn open_paths_in_tabs(&mut self, repos: &[String]) {
+        self.close_all_tabs();
+        self.restore_tabs(repos, 0);
+    }
+
+    /// `ui.workspaces`: list, open, save (the open tabs, or `repos`) or delete a workspace.
+    fn workspaces_command(&mut self, v: &Value) -> Result<Value, String> {
+        let name = v.get("name").and_then(Value::as_str).map(str::trim).unwrap_or("").to_string();
+        match v.get("action").and_then(Value::as_str).unwrap_or("list") {
+            "list" => {}
+            "open" => {
+                let w = self.prefs.workspaces.iter().find(|w| w.name == name).cloned().ok_or_else(|| format!("no workspace `{name}`"))?;
+                self.open_paths_in_tabs(&w.repos);
+                self.status(format!("Opened the {} workspace", w.name), false);
+            }
+            "save" => {
+                if name.is_empty() || name.len() > 100 {
+                    return Err("`name` is required".into());
+                }
+                let repos: Vec<String> = match v.get("repos").and_then(Value::as_array) {
+                    Some(a) => a.iter().filter_map(Value::as_str).map(str::to_string).take(50).collect(),
+                    None => {
+                        self.sync_tab_prefs();
+                        self.prefs.tabs.clone()
+                    }
+                };
+                if repos.is_empty() {
+                    return Err("open some repositories first (or pass `repos`)".into());
+                }
+                self.prefs.workspaces.retain(|w| w.name != name);
+                self.prefs.workspaces.push(Workspace { name: name.clone(), repos });
+                self.prefs.workspaces.truncate(100);
+            }
+            "delete" => self.prefs.workspaces.retain(|w| w.name != name),
+            other => return Err(format!("`action` is list, open, save or delete (not `{other}`)")),
+        }
+        Ok(json!({"workspaces": self.prefs.workspaces}))
+    }
+
+    /// Make commits in this app use the profile's author, or git's configuration again.
+    fn apply_identity(&mut self, name: &str, email: &str) {
+        let keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+        let git = &mut self.session.git;
+        if !name.is_empty() || !email.is_empty() {
+            git.env.retain(|(k, _)| !keys.contains(&k.as_str()));
+        }
+        if !name.is_empty() {
+            git.env.push(("GIT_AUTHOR_NAME".into(), name.into()));
+            git.env.push(("GIT_COMMITTER_NAME".into(), name.into()));
+        }
+        if !email.is_empty() {
+            git.env.push(("GIT_AUTHOR_EMAIL".into(), email.into()));
+            git.env.push(("GIT_COMMITTER_EMAIL".into(), email.into()));
+        }
+    }
+
+    /// `ui.profile`: list, switch, save (create or update) or delete a profile. Switching keeps the
+    /// current profile's tabs and favourites, then opens the other's.
+    fn profile_command(&mut self, v: &Value) -> Result<Value, String> {
+        let str_of = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim).unwrap_or("").to_string();
+        let name = str_of("name");
+        match v.get("action").and_then(Value::as_str).unwrap_or("list") {
+            "list" => {}
+            "save" => {
+                if name.is_empty() || name.len() > 100 {
+                    return Err("`name` is required".into());
+                }
+                let (git_name, git_email) = (str_of("gitName"), str_of("gitEmail"));
+                if !git_email.is_empty() && (!git_email.contains('@') || git_email.contains(['<', '>', '\n'])) {
+                    return Err("`gitEmail` is an e-mail address".into());
+                }
+                match self.prefs.profiles.iter_mut().find(|p| p.name == name) {
+                    Some(p) => {
+                        p.git_name = git_name;
+                        p.git_email = git_email;
+                    }
+                    None => {
+                        if self.prefs.profiles.len() >= 50 {
+                            return Err("at most 50 profiles".into());
+                        }
+                        self.prefs.profiles.push(Profile { name: name.clone(), git_name, git_email, ..Profile::default() });
+                    }
+                }
+                if self.prefs.active_profile == name
+                    && let Some(p) = self.prefs.profiles.iter().find(|p| p.name == name).cloned()
+                {
+                    self.apply_identity(&p.git_name, &p.git_email);
+                }
+            }
+            "delete" => {
+                if name.is_empty() {
+                    return Err("`name` is required".into());
+                }
+                if self.prefs.active_profile == name {
+                    return Err("switch to another profile first".into());
+                }
+                self.prefs.profiles.retain(|p| p.name != name);
+            }
+            "switch" => {
+                if name == self.prefs.active_profile {
+                    return Ok(json!({"active": name, "profiles": self.prefs.profiles}));
+                }
+                // "No profile" keeps its tabs and favourites in an entry with no name.
+                let target = match self.prefs.profiles.iter().find(|p| p.name == name).cloned() {
+                    Some(p) => p,
+                    None if name.is_empty() => Profile::default(),
+                    None => return Err(format!("no profile `{name}`")),
+                };
+                self.sync_tab_prefs();
+                let (tabs, favs) = (self.prefs.tabs.clone(), self.prefs.favorites.clone());
+                let current = self.prefs.active_profile.clone();
+                if current.is_empty() && !self.prefs.profiles.iter().any(|p| p.name.is_empty()) {
+                    self.prefs.profiles.push(Profile::default());
+                }
+                if let Some(p) = self.prefs.profiles.iter_mut().find(|p| p.name == current) {
+                    p.tabs = tabs;
+                    p.favorites = favs;
+                }
+                self.prefs.active_profile = name.clone();
+                // Tabs swap sessions as they close: close them first, then give the one left (which
+                // every new tab copies) the profile's author.
+                self.close_all_tabs();
+                let keys = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+                if !current.is_empty() && self.prefs.profiles.iter().any(|p| p.name == current && (!p.git_name.is_empty() || !p.git_email.is_empty()))
+                {
+                    self.session.git.env.retain(|(k, _)| !keys.contains(&k.as_str()));
+                }
+                self.apply_identity(&target.git_name, &target.git_email);
+                self.prefs.favorites = target.favorites.clone();
+                self.restore_tabs(&target.tabs, 0);
+                self.status(if name.is_empty() { "No profile".to_string() } else { format!("Switched to the {name} profile") }, false);
+            }
+            other => return Err(format!("`action` is list, switch, save or delete (not `{other}`)")),
+        }
+        Ok(json!({"active": self.prefs.active_profile, "profiles": self.prefs.profiles}))
+    }
+
     fn repo_key(&self) -> String {
         self.session.repo.as_ref().map(|r| r.root().display().to_string()).unwrap_or_default()
     }

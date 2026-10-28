@@ -94,6 +94,49 @@ fn file_row(
     (clicked, hit, resp.on_hover_text(path))
 }
 
+/// A file's folder (`""` for the top folder).
+fn folder_of(path: &str) -> String {
+    path.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default()
+}
+
+/// A folder row in the tree view: chevron, folder name, file count, and an action button.
+/// Returns (open, the button was clicked).
+fn folder_row(ui: &mut egui::Ui, list: &str, dir: &str, n: usize, button: Option<(Icon, &str)>) -> (bool, bool) {
+    let t = Tokens::get(ui.ctx());
+    let key = egui::Id::new(("tree_folder", list, dir));
+    let mut open = ui.ctx().data(|d| d.get_temp::<bool>(key)).unwrap_or(true);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 4.0, t.hover);
+    }
+    let p = ui.painter();
+    icons::paint(
+        p,
+        Rect::from_center_size(pos2(rect.left() + 9.0, rect.center().y), vec2(11.0, 11.0)),
+        if open { Icon::ChevronDown } else { Icon::Chevron },
+        t.dim,
+        t.dim,
+    );
+    icons::paint(p, Rect::from_center_size(pos2(rect.left() + 24.0, rect.center().y), vec2(14.0, 14.0)), Icon::Folder, t.dim, t.accent);
+    let name = if dir.is_empty() { "(top folder)".to_string() } else { format!("{dir}/") };
+    p.text(pos2(rect.left() + 36.0, rect.center().y), egui::Align2::LEFT_CENTER, name, FontId::proportional(12.0), t.text);
+    p.text(pos2(rect.right() - 34.0, rect.center().y), egui::Align2::RIGHT_CENTER, n.to_string(), FontId::proportional(11.0), t.dim);
+    let mut act = false;
+    if let Some((icon, tip)) = button
+        && ui.rect_contains_pointer(rect)
+    {
+        let b = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(22.0, 20.0));
+        let r = ui.interact(b, key.with("act"), Sense::click()).on_hover_text(tip);
+        icons::paint(ui.painter(), b.shrink(3.0), icon, t.text, t.accent);
+        act = r.clicked();
+    }
+    if resp.clicked() && !act {
+        open = !open;
+        ui.ctx().data_mut(|d| d.insert_temp(key, open));
+    }
+    (open, act)
+}
+
 pub fn change_of(code: &str) -> Change {
     match code {
         "added" => Change::Added,
@@ -233,6 +276,9 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
                     "Discard All",
                 ));
             }
+            if ui.selectable_label(app.prefs.tree_view, "Tree").on_hover_text("Group files by folder").clicked() {
+                app.prefs.tree_view = !app.prefs.tree_view;
+            }
         });
     });
     if st.state != RepoState::Clean {
@@ -267,7 +313,10 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
     let list_h = ((avail - 250.0) / 2.0).max(70.0);
     let sel_file = app.session.sel.file.clone();
 
-    let unstaged: Vec<FileStatus> = st.unstaged().cloned().collect();
+    let mut unstaged: Vec<FileStatus> = st.unstaged().cloned().collect();
+    if app.prefs.tree_view {
+        unstaged.sort_by(|a, b| (folder_of(&a.path), &a.path).cmp(&(folder_of(&b.path), &b.path)));
+    }
     if section(ui, "Unstaged Files", unstaged.len(), Some(("Stage all changes", app.disabled("stage.all")))) {
         run = Some(("stage.all", json!({})));
     }
@@ -276,7 +325,26 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
             if unstaged.is_empty() {
                 ui.label(RichText::new("No unstaged changes").small().weak());
             }
+            let tree = app.prefs.tree_view;
+            let mut current_dir: Option<String> = None;
+            let mut hidden = false;
             for f in &unstaged {
+                if tree {
+                    let dir = folder_of(&f.path);
+                    if current_dir.as_deref() != Some(dir.as_str()) {
+                        let in_dir: Vec<String> =
+                            unstaged.iter().filter(|x| folder_of(&x.path) == dir && x.conflict.is_none()).map(|x| x.path.clone()).collect();
+                        let (open, act) = folder_row(ui, "unstaged", &dir, in_dir.len(), Some((Icon::Plus, "Stage the folder")));
+                        if act && !in_dir.is_empty() {
+                            run = Some(("stage.file", json!({"paths": in_dir})));
+                        }
+                        hidden = !open;
+                        current_dir = Some(dir);
+                    }
+                    if hidden {
+                        continue;
+                    }
+                }
                 let conflict = f.conflict.is_some();
                 let selected = sel_file.as_ref().is_some_and(|s| s.path == f.path && s.area == Area::Unstaged);
                 let buttons: &[(Icon, &str)] =
@@ -375,7 +443,10 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
         });
     });
     ui.add_space(6.0);
-    let staged: Vec<FileStatus> = st.staged().cloned().collect();
+    let mut staged: Vec<FileStatus> = st.staged().cloned().collect();
+    if app.prefs.tree_view {
+        staged.sort_by(|a, b| (folder_of(&a.path), &a.path).cmp(&(folder_of(&b.path), &b.path)));
+    }
     if section(ui, "Staged Files", staged.len(), Some(("Unstage all changes", app.disabled("unstage.all")))) {
         run = Some(("unstage.all", json!({})));
     }
@@ -384,7 +455,25 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
             if staged.is_empty() {
                 ui.label(RichText::new("Stage files to commit them").small().weak());
             }
+            let tree = app.prefs.tree_view;
+            let mut current_dir: Option<String> = None;
+            let mut hidden = false;
             for f in &staged {
+                if tree {
+                    let dir = folder_of(&f.path);
+                    if current_dir.as_deref() != Some(dir.as_str()) {
+                        let in_dir: Vec<String> = staged.iter().filter(|x| folder_of(&x.path) == dir).map(|x| x.path.clone()).collect();
+                        let (open, act) = folder_row(ui, "staged", &dir, in_dir.len(), Some((Icon::Minus, "Unstage the folder")));
+                        if act {
+                            run = Some(("unstage.file", json!({"paths": in_dir})));
+                        }
+                        hidden = !open;
+                        current_dir = Some(dir);
+                    }
+                    if hidden {
+                        continue;
+                    }
+                }
                 let selected = sel_file.as_ref().is_some_and(|s| s.path == f.path && s.area == Area::Staged);
                 let (clicked, hit, resp) = file_row(ui, &f.path, f.index, selected, false, &[(Icon::Minus, "Unstage file")]);
                 if clicked {

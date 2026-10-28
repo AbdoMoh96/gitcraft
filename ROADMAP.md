@@ -13,6 +13,12 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M3.** Many repositories. Workspaces (`ui.workspaces`: save the open tabs under a
+  name, open them all again from the repository menu). Profiles (`ui.profile`: each keeps its own
+  tabs and favourites and can commit as its own author, set as git's author and committer for the
+  profile's repositories). Find Repositories (`repo.scan`: the git repositories under a folder,
+  three levels down; open them in tabs or save them as a workspace). The commit panel's Tree view
+  groups files by folder (`ui.treeView`), with stage / unstage for a whole folder.
 - **2026-10-28 — M3.** Everyday extras. Stashes: Stash This File (`stash.save` with `paths`), Rename
   (`stash.rename`), View Changes (a compare of the stash with its base). Remotes: Edit URL and Rename
   (`remote.editUrl`, `remote.rename`), Prune Deleted Branches (`remote.prune`), drag a local branch

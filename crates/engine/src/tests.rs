@@ -710,3 +710,19 @@ fn stash_extras_multi_select_and_remotes() {
     run(&mut s, "remote.rename", json!({"from": "origin", "to": "upstream"}));
     assert_eq!(s.data.remotes[0].name, "upstream");
 }
+
+#[test]
+fn scanning_finds_repositories() {
+    let (d, mut s) = session("eng-scan");
+    let base = d.path();
+    let _ = gitcraft_git::testing::isolated_git(base).unwrap().init(&base.join("a/b/deep"), Some("main")).unwrap();
+    std::fs::create_dir_all(base.join("node_modules/x/.git")).unwrap();
+    let r = run(&mut s, "repo.scan", json!({"path": base.display().to_string()}));
+    let found: Vec<String> = r["repositories"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+    assert!(found.iter().any(|f| f.ends_with("work")), "{found:?}");
+    assert!(found.iter().any(|f| f.ends_with("deep")), "{found:?}");
+    assert!(!found.iter().any(|f| f.contains("node_modules")));
+    let r = run(&mut s, "repo.scan", json!({"path": base.display().to_string(), "depth": 1}));
+    assert!(!r["repositories"].as_array().unwrap().iter().any(|f| f.as_str().unwrap().ends_with("deep")));
+    assert!(s.run("repo.scan", &json!({"path": "/no/such/folder"})).is_err());
+}

@@ -26,5 +26,5 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
    `tool.merge` (git's configured tools, not waited for), open / edit / reveal a file.
 9. **Hosting integrations** — `pr.list`, `pr.create`, `issues.list`, `ci.list`, `integrations.connect`
    (needs a decision from the owner on accounts and tokens).
-10. **Workspaces, profiles, cloud** — `workspace.open`, `profile.switch`, `cloudpatch.create`,
-    `launchpad.open`.
+10. ~~Workspaces, profiles~~ — landed: `ui.workspaces`, `ui.profile` (own tabs, favourites and commit
+    author), `repo.scan`, `ui.treeView`. Cloud: `cloudpatch.create`, `launchpad.open` (see 9).
