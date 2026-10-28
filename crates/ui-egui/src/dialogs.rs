@@ -71,6 +71,15 @@ pub enum Dialog {
         url: String,
         path: String,
     },
+    RenameStash {
+        index: usize,
+        message: String,
+    },
+    EditRemote {
+        name: String,
+        new_name: String,
+        url: String,
+    },
     /// Save a commit (or the uncommitted changes) as a patch file.
     SavePatch {
         oid: Option<String>,
@@ -212,6 +221,15 @@ impl Dialog {
                 }
             }
             "hooks.list" => Dialog::Hooks { selected: String::new(), script: String::new() },
+            "stash.rename" => Dialog::RenameStash {
+                index: v.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                message: st("message").unwrap_or_default(),
+            },
+            "remote.editUrl" => {
+                let name = st("name").or_else(|| s.data.remotes.first().map(|r| r.name.clone()))?;
+                let url = s.data.remotes.iter().find(|r| r.name == name).map(|r| r.fetch_url.clone()).unwrap_or_default();
+                Dialog::EditRemote { new_name: name.clone(), name, url }
+            }
             "submodule.add" => Dialog::AddSubmodule { url: st("url").unwrap_or_default(), path: st("path").unwrap_or_default() },
             "worktree.add" => {
                 Dialog::AddWorktree { path: st("path").unwrap_or_default(), branch: st("branch").unwrap_or_default(), new_branch: true }
@@ -280,6 +298,8 @@ impl Dialog {
             Dialog::Diverged { .. } => "diverged",
             Dialog::Rebase { .. } => "rebase.interactive",
             Dialog::AddSubmodule { .. } => "submodule.add",
+            Dialog::RenameStash { .. } => "stash.rename",
+            Dialog::EditRemote { .. } => "remote.editUrl",
             Dialog::SavePatch { .. } => "patch.create",
             Dialog::ApplyPatch { .. } => "patch.apply",
             Dialog::GitFlow { .. } => "gitflow.init",
@@ -617,6 +637,35 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
             if ok {
                 return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
+            }
+        }
+        Dialog::RenameStash { index, message } => {
+            ui.heading(format!("Rename stash@{{{index}}}"));
+            ui.add_space(6.0);
+            field(ui, "MESSAGE", message, "", first);
+            let (ok, cancel) = buttons(ui, "Rename", !message.trim().is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("stash.rename".into(), json!({"index": *index, "message": message.trim()}));
+            }
+        }
+        Dialog::EditRemote { name, new_name, url } => {
+            ui.heading(format!("Edit Remote {name}"));
+            ui.add_space(6.0);
+            field(ui, "NAME", new_name, "origin", first);
+            field(ui, "URL", url, "https://host/owner/repo.git", false);
+            let (ok, cancel) = buttons(ui, "Save", !new_name.trim().is_empty() && !url.trim().is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                let _ = app.run("remote.editUrl", json!({"name": name, "url": url.trim()}));
+                if new_name.trim() != name {
+                    return Close::Run("remote.rename".into(), json!({"from": name, "to": new_name.trim()}));
+                }
+                return Close::Cancel;
             }
         }
         Dialog::SavePatch { oid, path } => {
@@ -1006,6 +1055,11 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 app.prefs.commit_limit = n;
             }
             ui.checkbox(&mut app.prefs.reopen_last, "Reopen the last repository at start");
+            ui.horizontal(|ui| {
+                ui.label("Fetch automatically every");
+                ui.add(egui::DragValue::new(&mut app.prefs.auto_fetch_minutes).range(0..=240).suffix(" min"));
+                ui.label(RichText::new("(0: never)").small().weak());
+            });
             ui.checkbox(&mut app.prefs.conflict_check, "Warn when merging the target or upstream branch would conflict")
                 .on_hover_text("Merges in memory in the background after each change; nothing on disk is touched");
             if ui

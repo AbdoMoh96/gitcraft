@@ -2,6 +2,7 @@
 //! Double-click checks a branch out; right-click opens its menu.
 
 use egui::{Frame, Margin, RichText, Sense, Stroke, vec2};
+
 use gitcraft_engine::git::{Ref, RefKind};
 use serde_json::json;
 
@@ -59,7 +60,7 @@ fn header(ui: &mut egui::Ui, id: &str, icon: Icon, title: &str, count: usize, ex
 /// One row: indent, icon, name, badges; returns the response.
 fn row(ui: &mut egui::Ui, indent: f32, icon: Icon, name: &str, bold: bool, badge: Option<String>, color: Option<egui::Color32>) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click_and_drag());
     if resp.hovered() {
         ui.painter().rect_filled(rect, 4.0, t.hover);
     }
@@ -117,16 +118,42 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
             ui.close();
         }
     }) {
-        for r in &locals {
+        let pinned = app.pinned_branches();
+        let mut ordered: Vec<&Ref> = locals.iter().filter(|r| pinned.contains(&r.name)).collect();
+        ordered.extend(locals.iter().filter(|r| !pinned.contains(&r.name)));
+        for r in ordered {
             let color = lane_of(app, &r.commit);
-            let resp = row(ui, 22.0, Icon::Branch, &r.name, r.head, track_badge(r), color);
+            let is_pinned = pinned.contains(&r.name);
+            let badge = match (track_badge(r), is_pinned) {
+                (Some(b), true) => Some(format!("pinned  {b}")),
+                (None, true) => Some("pinned".to_string()),
+                (b, false) => b,
+            };
+            let resp = row(ui, 22.0, Icon::Branch, &r.name, r.head, badge, color);
+            if app.picked_branches.contains(&r.name) {
+                let t = Tokens::get(ui.ctx());
+                ui.painter().rect_stroke(resp.rect.shrink(1.0), 4.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+            }
+            resp.dnd_set_drag_payload(crate::graph_view::DragRef { name: r.name.clone() });
             if resp.clicked() {
-                let _ = app.run("graph.select", json!({"oid": r.commit}));
+                if ui.input(|i| i.modifiers.command) {
+                    // Mod-click picks several branches (to delete them together).
+                    if !app.picked_branches.remove(&r.name) {
+                        app.picked_branches.insert(r.name.clone());
+                    }
+                } else {
+                    app.picked_branches.clear();
+                    let _ = app.run("graph.select", json!({"oid": r.commit}));
+                }
             }
             if resp.double_clicked() && !r.head {
                 let _ = app.run("branch.checkout", json!({"name": r.name}));
             }
-            resp.context_menu(|ui| branch_menu(app, ui, r));
+            if app.picked_branches.len() > 1 && app.picked_branches.contains(&r.name) {
+                resp.context_menu(|ui| picked_menu(app, ui));
+            } else {
+                resp.context_menu(|ui| branch_menu(app, ui, r));
+            }
         }
     }
     if header(ui, "remote", Icon::Cloud, "REMOTE", remotes.len(), |ui| {
@@ -138,9 +165,37 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
         for remote in &remotes {
             let mine: Vec<&Ref> = remote_refs.iter().filter(|r| r.remote() == Some(remote.as_str())).collect();
             let resp = row(ui, 22.0, Icon::Cloud, remote, false, Some(mine.len().to_string()), None);
+            // Drop a local branch on a remote to push it there.
+            if let Some(dr) = egui::DragAndDrop::payload::<crate::graph_view::DragRef>(ui.ctx())
+                && app.session.data.local_branches().any(|b| b.name == dr.name)
+                && resp.contains_pointer()
+            {
+                let t = Tokens::get(ui.ctx());
+                ui.painter().rect_stroke(resp.rect.shrink(1.0), 4.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+                resp.clone().on_hover_text(format!("Push {} to {remote}", dr.name));
+            }
+            if let Some(dr) = resp.dnd_release_payload::<crate::graph_view::DragRef>()
+                && app.session.data.local_branches().any(|b| b.name == dr.name)
+            {
+                let _ = app.run("remote.push", json!({"branch": dr.name, "remote": remote}));
+            }
             resp.context_menu(|ui| {
                 if ui.button(format!("Fetch {remote}")).clicked() {
                     let _ = app.run("remote.fetch", json!({"remote": remote}));
+                    ui.close();
+                }
+                if ui.button("Prune Deleted Branches").clicked() {
+                    let _ = app.run("remote.prune", json!({"name": remote}));
+                    ui.close();
+                }
+                if ui.button("Edit URL…").clicked() {
+                    let url = app.session.data.remotes.iter().find(|x| x.name == *remote).map(|x| x.fetch_url.clone()).unwrap_or_default();
+                    app.dialog = Some(Dialog::EditRemote { name: remote.clone(), new_name: remote.clone(), url });
+                    ui.close();
+                }
+                if ui.button("Copy URL").clicked() {
+                    let url = app.session.data.remotes.iter().find(|x| x.name == *remote).map(|x| x.fetch_url.clone()).unwrap_or_default();
+                    app.copy(url);
                     ui.close();
                 }
                 if ui.button(format!("Remove {remote}")).clicked() {
@@ -182,6 +237,16 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
                     let _ = app.run("stash.pop", json!({"index": i}));
                     ui.close();
                 }
+                if ui.button("View Changes").clicked() {
+                    let r = format!("stash@{{{i}}}");
+                    let _ = app.run("diff.compare", json!({"from": format!("{r}^1"), "to": r}));
+                    ui.close();
+                }
+                if ui.button("Rename…").clicked() {
+                    let current = msg.split_once(": ").map(|(_, m)| m.to_string()).unwrap_or_else(|| msg.clone());
+                    app.dialog = Some(Dialog::RenameStash { index: *i, message: current });
+                    ui.close();
+                }
                 if ui.button("Delete Stash").clicked() {
                     app.dialog = Some(Dialog::confirm("Delete stash?", msg, "stash.drop", json!({"index": i}), "Delete"));
                     ui.close();
@@ -206,6 +271,16 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
                 }
                 if ui.button("Delete Tag").clicked() {
                     let _ = app.run("tag.delete", json!({"name": r.name}));
+                    ui.close();
+                }
+                if ui.add_enabled(app.disabled("tag.deleteRemote").is_none(), egui::Button::new("Delete Tag from Remote…")).clicked() {
+                    app.dialog = Some(Dialog::confirm(
+                        &format!("Delete tag {} on the remote?", r.name),
+                        "This removes the tag from the server for everyone. The local tag stays.",
+                        "tag.deleteRemote",
+                        json!({"name": r.name}),
+                        "Delete",
+                    ));
                     ui.close();
                 }
             });
@@ -408,8 +483,38 @@ pub fn branch_menu(app: &mut GitApp, ui: &mut egui::Ui, r: &Ref) {
         let _ = app.run("diff.compare", json!({"from": "HEAD", "to": r.name}));
         ui.close();
     }
+    if local {
+        let pinned = app.pinned_branches().contains(&r.name);
+        if ui.button(if pinned { "Unpin" } else { "Pin to Top" }).clicked() {
+            app.toggle_pin(&r.name);
+            ui.close();
+        }
+    }
     if ui.button("Copy Branch Name").clicked() {
         app.copy(r.name.clone());
+        ui.close();
+    }
+}
+
+/// The menu for several branches picked with Mod-click.
+fn picked_menu(app: &mut GitApp, ui: &mut egui::Ui) {
+    let names: Vec<String> = app.picked_branches.iter().cloned().collect();
+    ui.label(RichText::new(format!("{} branches", names.len())).small().weak());
+    let current = app.session.data.status.branch.clone();
+    let deletable: Vec<String> = names.iter().filter(|n| Some(*n) != current.as_ref()).cloned().collect();
+    if ui.add_enabled(!deletable.is_empty(), egui::Button::new(format!("Delete {} Branches…", deletable.len()))).clicked() {
+        app.dialog = Some(Dialog::confirm(
+            &format!("Delete {} branches?", deletable.len()),
+            &format!("{}\n\nUndo brings them back until you close GitCraft.", deletable.join(", ")),
+            "branch.delete",
+            json!({"names": deletable, "force": true}),
+            "Delete",
+        ));
+        app.picked_branches.clear();
+        ui.close();
+    }
+    if ui.button("Clear Selection").clicked() {
+        app.picked_branches.clear();
         ui.close();
     }
 }

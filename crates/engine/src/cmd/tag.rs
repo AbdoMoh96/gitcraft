@@ -50,6 +50,19 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(r#"{"name": string, "oid"?: commit (default: selected or HEAD), "message"?: string (annotated)}"#)
             .when(need_commits),
         CommandSpec::new("tag.delete", "Delete Tag", "Left Panel › Tags", delete).params(r#"{"name": string}"#).when(need_commits),
+        CommandSpec::new("tag.deleteRemote", "Delete Tag from Remote", "Left Panel › Tags", |s, v| {
+            let name = p::req_str(v, "name")?.trim().to_string();
+            let repo = s.repo()?.clone();
+            let remote = match p::str(v, "remote").filter(|r| !r.trim().is_empty()) {
+                Some(r) => r.to_string(),
+                None => repo.default_remote()?,
+            };
+            repo.delete_remote_tag(&remote, &name)?;
+            done(format!("Deleted tag {name} from {remote}"))
+        })
+        .params(r#"{"name": string, "remote"?: string}"#)
+        .slow()
+        .when(need_remote),
         CommandSpec::new("tag.push", "Push Tag", "Left Panel › Tags", push).params(r#"{"name": string, "remote"?: string}"#).slow().when(need_remote),
     ]
 }

@@ -76,6 +76,19 @@ Left Panel|Sections|Delete Tag|tag.delete
 Left Panel|Sections|Push Tag|tag.push
 Left Panel|Sections|Apply Stash|stash.apply
 Left Panel|Sections|Delete Stash|stash.drop
+Left Panel|Sections|Rename Stash|stash.rename
+Left Panel|Sections|Stash Selected Files|stash.save
+Left Panel|Sections|Delete Tag from Remote|tag.deleteRemote
+Left Panel|Sections|Edit Remote URL|remote.editUrl
+Left Panel|Sections|Rename Remote|remote.rename
+Left Panel|Sections|Prune Remote|remote.prune
+Left Panel|Sections|Pin Branch|ui.pin
+Left Panel|Sections|Delete Several Branches|branch.delete
+Left Panel|Sections|Drag a Branch onto a Remote to Push|remote.push
+Graph|Commit Menu|Cherry Pick Several Commits|cherryPick.commit
+Repository|Management|Favourite Repositories|ui.favorite
+Toolbar|Actions|Auto-fetch|ui.autoFetch
+Tools|General|Notifications|repo.activity
 Left Panel|Sections|Filter Branches|ui.filterRefs
 Left Panel|Sections|Toggle Left Panel|view.leftPanel
 Left Panel|Sections|Pull Requests|pr.list
@@ -178,6 +191,9 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.openFile",
     "ui.openInEditor",
     "ui.revealFile",
+    "ui.pin",
+    "ui.favorite",
+    "ui.autoFetch",
 ];
 
 pub struct Entry {
@@ -252,7 +268,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 137;
+    const FLOOR: usize = 150;
 
     #[test]
     fn parity_floor() {

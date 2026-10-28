@@ -357,6 +357,10 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
                             }
                         });
                     }
+                    if !conflict && ui.button("Stash This File").clicked() {
+                        run = Some(("stash.save", json!({"paths": [f.path], "message": f.path})));
+                        ui.close();
+                    }
                     file_actions(app, ui, &f.path, f.worktree != Change::Deleted);
                     if ui.button("Copy Path").clicked() {
                         app.copy(f.path.clone());

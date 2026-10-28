@@ -70,6 +70,12 @@ pub struct Prefs {
     pub zoom: f32,
     /// The command that opens a file in an editor (`code -g {file}`); empty: the system's app.
     pub editor: String,
+    /// Branches pinned to the top of the left panel, by repository folder.
+    pub pinned: std::collections::BTreeMap<String, Vec<String>>,
+    /// Favourite repositories (shown first).
+    pub favorites: Vec<String>,
+    /// Fetch every N minutes while a repository is open (0: never).
+    pub auto_fetch_minutes: u32,
 }
 
 impl Default for Prefs {
@@ -87,6 +93,9 @@ impl Default for Prefs {
             conflict_check: true,
             zoom: 1.0,
             editor: String::new(),
+            pinned: Default::default(),
+            favorites: Vec::new(),
+            auto_fetch_minutes: 0,
         }
     }
 }
@@ -116,6 +125,8 @@ pub struct Job {
     reply: Option<Sender<Value>>,
     /// The tab it runs for (`tabs::Tabs::ids`).
     tab: u64,
+    /// Started by GitCraft itself (auto-fetch): no notification when it succeeds.
+    quiet: bool,
 }
 
 /// The status line.
@@ -176,6 +187,12 @@ pub struct GitApp {
     pub conflict_alert: conflict_alert::ConflictAlert,
     /// Changed words of the diff on screen: (path, area, generation, context, whitespace) → cache.
     pub words: ((String, String, u64, u32, bool), diff_view::WordCache),
+    /// Local branches picked with Mod-click in the left panel.
+    pub picked_branches: std::collections::BTreeSet<String>,
+    /// Commits picked with Shift-click in the graph (to cherry-pick together).
+    pub picked_commits: Vec<String>,
+    /// When the last automatic fetch started.
+    last_auto_fetch: f64,
     /// A work tree file open in the in-app editor.
     pub editor: Option<editor::Editor>,
     /// The graph's overview marks: (generation, search) → marks.
@@ -236,6 +253,9 @@ impl GitApp {
             zoom_seen: 1.0,
             minimap: None,
             editor: None,
+            picked_branches: Default::default(),
+            picked_commits: Vec::new(),
+            last_auto_fetch: util::now_s(),
             images: None,
         }
     }
@@ -415,9 +435,22 @@ impl GitApp {
             Ok(_) => {
                 // Progress shows in the status bar only; the result gets a notification.
                 self.toast = Some(Toast { text: format!("{label}…"), error: false, at: util::now_s() });
-                self.jobs.push(Job { id, label, started: util::now_s(), rx, reply, tab: self.tabs.active_id() });
+                self.jobs.push(Job { id, label, started: util::now_s(), rx, reply, tab: self.tabs.active_id(), quiet: false });
             }
             Err(e) => self.status(format!("{label}: {e}"), true),
+        }
+    }
+
+    /// [`GitApp::spawn`] for work GitCraft starts itself: no status line, no success toast.
+    fn spawn_quiet(&mut self, id: &'static str, label: &'static str, params: Value) {
+        let n = self.jobs.len();
+        let before = self.toast.clone();
+        self.spawn(id, label, params, None);
+        if self.jobs.len() > n
+            && let Some(j) = self.jobs.last_mut()
+        {
+            j.quiet = true;
+            self.toast = before;
         }
     }
 
@@ -426,16 +459,29 @@ impl GitApp {
         let mut done = Vec::new();
         self.jobs.retain(|j| match j.rx.try_recv() {
             Ok(r) => {
-                done.push((j.id, r, j.reply.clone(), j.tab));
+                done.push((j.id, r, j.reply.clone(), j.tab, j.quiet));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), j.reply.clone(), j.tab));
+                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), j.reply.clone(), j.tab, j.quiet));
                 false
             }
         });
-        for (id, r, reply, tab) in done {
+        for (id, r, reply, tab, quiet) in done {
+            if quiet && r.is_ok() {
+                // An automatic fetch: reload quietly (only when it's the tab on screen).
+                if self.tabs.index_of(tab) == Some(self.tabs.active) {
+                    let before = self.session.data.refs.clone();
+                    let _ = self.session.refresh();
+                    let news =
+                        self.session.data.refs.iter().filter(|r| r.kind == gitcraft_engine::git::RefKind::Remote && !before.contains(r)).count();
+                    if news > 0 {
+                        self.notify(Some("Fetched"), format!("{news} remote branch{} changed", if news == 1 { "" } else { "es" }), false);
+                    }
+                }
+                continue;
+            }
             // A job for a hidden tab: show its tab while taking the result, then come back
             // (unless the result asks something, which stays on its tab).
             let back = self.tabs.active_id();
@@ -529,6 +575,27 @@ impl GitApp {
                     util::open_terminal(&root, &self.prefs.terminal)?
                 };
                 Ok(json!({"path": root.display().to_string(), "terminal": prog}))
+            }
+            "ui.pin" => {
+                let name = s("name").ok_or("`name` is required")?.to_string();
+                if !self.session.data.local_branches().any(|r| r.name == name) {
+                    return Err(format!("no local branch `{name}`"));
+                }
+                self.toggle_pin(&name);
+                Ok(json!({"pinned": self.pinned_branches()}))
+            }
+            "ui.favorite" => {
+                let path = s("path")
+                    .map(str::to_string)
+                    .or_else(|| self.session.repo.as_ref().map(|r| r.root().display().to_string()))
+                    .ok_or("`path` is required")?;
+                self.toggle_favorite(&path);
+                Ok(json!({"favorites": self.prefs.favorites}))
+            }
+            "ui.autoFetch" => {
+                let m = v.get("minutes").and_then(Value::as_u64).ok_or("`minutes` (0 to turn it off) is required")?;
+                self.prefs.auto_fetch_minutes = m.min(240) as u32;
+                Ok(json!({"minutes": self.prefs.auto_fetch_minutes}))
             }
             "ui.editFile" => {
                 let path =
@@ -666,6 +733,7 @@ impl GitApp {
         self.poll_jobs();
         self.poll_control(ctx);
         self.poll_conflict_alert();
+        self.auto_fetch();
         self.avatars.poll(ctx);
         if let Some(text) = self.pending_copy.take() {
             ctx.copy_text(text);
@@ -861,6 +929,51 @@ impl GitApp {
 }
 
 impl GitApp {
+    fn repo_key(&self) -> String {
+        self.session.repo.as_ref().map(|r| r.root().display().to_string()).unwrap_or_default()
+    }
+
+    /// The open repository's pinned branches.
+    pub fn pinned_branches(&self) -> Vec<String> {
+        self.prefs.pinned.get(&self.repo_key()).cloned().unwrap_or_default()
+    }
+
+    pub fn toggle_pin(&mut self, branch: &str) {
+        let key = self.repo_key();
+        let list = self.prefs.pinned.entry(key).or_default();
+        if let Some(i) = list.iter().position(|b| b == branch) {
+            list.remove(i);
+        } else if list.len() < 100 {
+            list.push(branch.to_string());
+        }
+        self.prefs.pinned.retain(|_, v| !v.is_empty());
+    }
+
+    pub fn toggle_favorite(&mut self, path: &str) {
+        if let Some(i) = self.prefs.favorites.iter().position(|p| p == path) {
+            self.prefs.favorites.remove(i);
+        } else if self.prefs.favorites.len() < 50 {
+            self.prefs.favorites.push(path.to_string());
+        }
+    }
+
+    /// Fetch in the background every few minutes when Preferences say so (quietly: only errors
+    /// and new commits are worth a notification).
+    fn auto_fetch(&mut self) {
+        let every = f64::from(self.prefs.auto_fetch_minutes.min(24 * 60)) * 60.0;
+        let now = util::now_s();
+        if every <= 0.0
+            || now - self.last_auto_fetch < every
+            || !self.jobs.is_empty()
+            || self.session.repo.is_none()
+            || self.session.data.remotes.is_empty()
+        {
+            return;
+        }
+        self.last_auto_fetch = now;
+        self.spawn_quiet("remote.fetch", "Fetch", json!({"prune": true}));
+    }
+
     /// Put text on the clipboard (on the next frame).
     pub fn copy(&mut self, text: impl Into<String>) {
         self.pending_copy = Some(text.into());

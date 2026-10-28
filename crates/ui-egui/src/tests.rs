@@ -116,6 +116,8 @@ fn every_view_lays_out() {
         "gitflow.init",
         "lfs.list",
         "hooks.list",
+        "stash.rename",
+        "remote.editUrl",
         "shortcuts",
         "preferences",
     ] {

@@ -50,6 +50,24 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_space(26.0);
+        if !app.prefs.favorites.is_empty() {
+            ui.label(RichText::new("FAVOURITES").small().strong().color(t.dim));
+            ui.add_space(4.0);
+            for p in app.prefs.favorites.clone() {
+                let name = std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone());
+                let r = ui.add(egui::Button::new(RichText::new(format!("{name}   {p}")).size(13.0)).frame(false));
+                if r.clicked() {
+                    let _ = app.open_repo(std::path::Path::new(&p));
+                }
+                r.context_menu(|ui| {
+                    if ui.button("Remove from Favourites").clicked() {
+                        app.toggle_favorite(&p);
+                        ui.close();
+                    }
+                });
+            }
+            ui.add_space(12.0);
+        }
         if !app.prefs.recent.is_empty() {
             ui.label(RichText::new("RECENT REPOSITORIES").small().strong().color(t.dim));
             ui.add_space(4.0);
@@ -59,6 +77,12 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 if r.clicked() {
                     let _ = app.ui_command("ui.recent", &json!({"index": i}));
                 }
+                r.context_menu(|ui| {
+                    if ui.button("Add to Favourites").clicked() {
+                        app.toggle_favorite(p);
+                        ui.close();
+                    }
+                });
             }
         }
         ui.add_space(16.0);

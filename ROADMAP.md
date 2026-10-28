@@ -13,6 +13,16 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M3.** Everyday extras. Stashes: Stash This File (`stash.save` with `paths`), Rename
+  (`stash.rename`), View Changes (a compare of the stash with its base). Remotes: Edit URL and Rename
+  (`remote.editUrl`, `remote.rename`), Prune Deleted Branches (`remote.prune`), drag a local branch
+  onto a remote in the left panel to push it there. Tags: Delete from Remote (`tag.deleteRemote`).
+  Mod-click several local branches to delete them together (`branch.delete` with `names`, one undo);
+  Shift-click several commits to cherry-pick them together (`cherryPick.commit` with `oids`). Pin a
+  branch to the top of the left panel (`ui.pin`), favourite repositories (`ui.favorite`, first in the
+  repository menu and the start screen), automatic fetch every N minutes (`ui.autoFetch`,
+  Preferences; quiet unless remote branches changed), and an Activity list in the status bar with
+  every result and error of the session.
 - **2026-10-28 — M5.** Tools. Ignore (`file.ignore`: the file, its extension, its folder, or only in
   this clone through `.git/info/exclude`). Edit in GitCraft (`file.edit`: an editor in the center with
   syntax colours, Mod+S saves) and Open in Editor / with the Default App / Show in File Manager

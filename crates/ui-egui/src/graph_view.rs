@@ -291,7 +291,13 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             author_cell(&p, &app.avatars, cols.author, commit, &fade, t);
             text_in(&p, cols.date, &util::relative_time(commit.author.time, now), FontId::proportional(12.0), fade(t.dim));
             text_in(&p, cols.sha, commit.short(), FontId::monospace(11.5), fade(t.dim));
-            if resp.clicked() {
+            if app.picked_commits.contains(&commit.oid) {
+                p.rect_stroke(rect.shrink(1.0), 3.0, Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+            }
+            if resp.clicked() && ui.input(|i| i.modifiers.shift) {
+                // Shift-click picks several commits (to cherry-pick them together).
+                actions.push(Action::Pick(commit.oid.clone()));
+            } else if resp.clicked() {
                 let compare_with = ui.input(|i| i.modifiers.command).then(|| match &app.session.sel.row {
                     Selected::Commit(o) if *o != commit.oid => Some(o.clone()),
                     _ => None,
@@ -620,6 +626,9 @@ enum Action {
     LabelPopup(LabelPopup),
     Dialog(Dialog),
     Copy(String),
+    /// Add a commit to (or take it out of) the picked commits.
+    Pick(String),
+    ClearPicks,
 }
 
 impl Action {
@@ -639,6 +648,14 @@ impl Action {
                 }
             }
             Action::Copy(s) => app.copy(s),
+            Action::Pick(oid) => {
+                if let Some(i) = app.picked_commits.iter().position(|o| *o == oid) {
+                    app.picked_commits.remove(i);
+                } else if app.picked_commits.len() < 1000 {
+                    app.picked_commits.push(oid);
+                }
+            }
+            Action::ClearPicks => app.picked_commits.clear(),
         }
     }
 }
@@ -828,6 +845,22 @@ fn pills(ui: &mut egui::Ui, r: Rect, ls: &[Label], color: Color32) -> Option<egu
 fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Action>) {
     let short = c.short().to_string();
     let d = &app.session.data;
+    if app.picked_commits.len() > 1 && app.picked_commits.contains(&c.oid) {
+        // Oldest first: the graph lists newest first.
+        let mut picks = app.picked_commits.clone();
+        picks.sort_by_key(|o| std::cmp::Reverse(d.row_of.get(o).copied().unwrap_or(0)));
+        ui.label(egui::RichText::new(format!("{} picked commits", picks.len())).small().weak());
+        if ui.add_enabled(app.disabled("cherryPick.commit").is_none(), egui::Button::new(format!("Cherry Pick {} Commits", picks.len()))).clicked() {
+            actions.push(Action::Run("cherryPick.commit", json!({"oids": picks})));
+            actions.push(Action::ClearPicks);
+            ui.close();
+        }
+        if ui.button("Clear Picks").clicked() {
+            actions.push(Action::ClearPicks);
+            ui.close();
+        }
+        ui.separator();
+    }
     for l in labels(d, &c.oid) {
         if l.tag {
             continue;

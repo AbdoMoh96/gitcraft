@@ -165,6 +165,30 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .params(r#"{"name": string, "url": string}"#)
         .when(need_repo),
+        CommandSpec::new("remote.editUrl", "Edit Remote URL", "Left Panel › Remote", |s, v| {
+            let name = p::req_str(v, "name")?;
+            let url = p::req_str(v, "url")?;
+            s.repo()?.set_remote_url(name, url, p::bool(v, "push").unwrap_or(false))?;
+            done(format!("{name} now points at {}", url.trim()))
+        })
+        .params(r#"{"name": string, "url": string, "push"?: bool (the push URL only)}"#)
+        .when(need_remote),
+        CommandSpec::new("remote.rename", "Rename Remote", "Left Panel › Remote", |s, v| {
+            let from = p::req_str(v, "from")?;
+            let to = p::req_str(v, "to")?;
+            s.repo()?.rename_remote(from, to)?;
+            done(format!("Renamed remote {from} to {to}"))
+        })
+        .params(r#"{"from": string, "to": string}"#)
+        .when(need_remote),
+        CommandSpec::new("remote.prune", "Prune Remote", "Left Panel › Remote", |s, v| {
+            let name = p::req_str(v, "name")?.trim().to_string();
+            let m = s.repo()?.prune_remote(&name)?;
+            Ok(json!({"message": format!("Pruned {name}'s deleted branches"), "git": m}))
+        })
+        .params(r#"{"name": string}"#)
+        .slow()
+        .when(need_remote),
         CommandSpec::new("remote.remove", "Remove Remote", "Left Panel › Remote", |s, v| {
             let name = p::req_str(v, "name")?;
             s.repo()?.remove_remote(name)?;

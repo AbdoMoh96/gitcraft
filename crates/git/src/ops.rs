@@ -407,6 +407,22 @@ impl Repo {
         self.conflicting(&args)
     }
 
+    /// Cherry-pick several commits, oldest first (merges are refused).
+    pub fn cherry_pick_many(&self, oids: &[String]) -> Result<Outcome> {
+        if oids.is_empty() || oids.len() > 1000 {
+            return Err(GitError::Arg("pick 1 to 1000 commits".into()));
+        }
+        let mut args = vec!["cherry-pick"];
+        for o in oids {
+            let o = check_name("commit", o)?;
+            if self.find_commit(o).map(|c| c.is_merge()).unwrap_or(false) {
+                return Err(GitError::Arg(format!("{o} is a merge: cherry-pick it on its own")));
+            }
+            args.push(o);
+        }
+        self.conflicting(&args)
+    }
+
     pub fn revert(&self, oid: &str) -> Result<Outcome> {
         let oid = check_name("commit", oid)?;
         let merge = self.find_commit(oid).map(|c| c.is_merge()).unwrap_or(false);
@@ -544,6 +560,34 @@ impl Repo {
         self.run_ok(&["remote", "add", name, url]).map(|_| ())
     }
 
+    /// Change a remote's URL (its push URL only, when `push`).
+    pub fn set_remote_url(&self, name: &str, url: &str, push: bool) -> Result<()> {
+        let (name, url) = (check_name("remote", name)?, check_name("url", url)?);
+        let mut args = vec!["remote", "set-url"];
+        if push {
+            args.push("--push");
+        }
+        args.extend(["--", name, url]);
+        self.run_ok(&args).map(|_| ())
+    }
+
+    pub fn rename_remote(&self, from: &str, to: &str) -> Result<()> {
+        let (from, to) = (check_name("remote", from)?, check_name("remote name", to)?);
+        self.run_ok(&["remote", "rename", "--", from, to]).map(|_| ())
+    }
+
+    /// Remove remote-tracking branches whose branch is gone from `name`.
+    pub fn prune_remote(&self, name: &str) -> Result<String> {
+        let name = check_name("remote", name)?;
+        Ok(self.run_ok(&["remote", "prune", "--", name])?.message())
+    }
+
+    pub fn delete_remote_tag(&self, remote: &str, tag: &str) -> Result<String> {
+        let remote = check_name("remote", remote)?;
+        let r = format!(":refs/tags/{}", check_name("tag", tag)?);
+        Ok(self.run_ok(&["push", remote, r.as_str()])?.message())
+    }
+
     pub fn remove_remote(&self, name: &str) -> Result<()> {
         let name = check_name("remote", name)?;
         self.run_ok(&["remote", "remove", name]).map(|_| ())
@@ -552,6 +596,11 @@ impl Repo {
     // ---- stashes ----
 
     pub fn stash_save(&self, message: Option<&str>, include_untracked: bool) -> Result<()> {
+        self.stash_paths(message, include_untracked, &[])
+    }
+
+    /// Stash only `paths` (all changes when empty).
+    pub fn stash_paths(&self, message: Option<&str>, include_untracked: bool, paths: &[String]) -> Result<()> {
         let mut args = vec!["stash", "push", "-q"];
         if include_untracked {
             args.push("--include-untracked");
@@ -562,7 +611,16 @@ impl Repo {
             args.extend(["-m", m.as_str()]);
         }
         let before = self.resolve("refs/stash");
-        self.run_ok(&args)?;
+        if paths.is_empty() {
+            self.run_ok(&args)?;
+        } else {
+            args.push("--");
+            for p in paths {
+                args.push(check_path(p)?);
+            }
+            // Not literal: `stash -u` uses pathspec magic itself; the paths come from status.
+            self.run_ok(&args)?;
+        }
         if self.resolve("refs/stash") == before {
             return Err(GitError::Arg("there are no changes to stash".into()));
         }
@@ -577,6 +635,17 @@ impl Repo {
     pub fn stash_pop(&self, index: usize) -> Result<Outcome> {
         let r = format!("stash@{{{index}}}");
         self.conflicting(&["stash", "pop", r.as_str()])
+    }
+
+    /// Give stash `index` a new message (it moves to the top of the list).
+    pub fn stash_rename(&self, index: usize, message: &str) -> Result<()> {
+        let message = check_name("stash message", message)?;
+        let r = format!("stash@{{{index}}}");
+        let oid = self.resolve(&r).ok_or_else(|| GitError::Arg(format!("no {r}")))?;
+        self.run_ok(&["stash", "store", "-q", "-m", message, oid.as_str()])?;
+        // The stored copy is stash@{0} now; the old entry moved down one.
+        let old = format!("stash@{{{}}}", index.saturating_add(1));
+        self.run_ok(&["stash", "drop", "-q", old.as_str()]).map(|_| ())
     }
 
     pub fn stash_drop(&self, index: usize) -> Result<()> {

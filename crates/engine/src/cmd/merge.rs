@@ -23,6 +23,12 @@ fn rebase(s: &mut Session, v: &Value) -> CmdResult {
 }
 
 fn cherry_pick(s: &mut Session, v: &Value) -> CmdResult {
+    if let Some(a) = v.get("oids").and_then(Value::as_array) {
+        let oids: Vec<String> = a.iter().filter_map(Value::as_str).map(str::to_string).collect();
+        let n = oids.len();
+        let o = s.repo()?.cherry_pick_many(&oids)?;
+        return outcome(&format!("Cherry-picked {n} commit{}", if n == 1 { "" } else { "s" }), &o);
+    }
     let oid = target_commit(s, v)?;
     let o = s.repo()?.cherry_pick(&oid)?;
     outcome(&format!("Cherry-picked {}", oid.get(..7).unwrap_or(&oid)), &o)
@@ -142,7 +148,7 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .when(|s| need_operation(s).or_else(|| (s.data.status.state != gitcraft_git::RepoState::Rebasing).then_some("no rebase is in progress"))),
         CommandSpec::new("cherryPick.commit", "Cherry Pick Commit", "Graph › Commit Menu", cherry_pick)
-            .params(r#"{"oid"?: commit (default: selected)}"#)
+            .params(r#"{"oid"?: commit (default: selected)} | {"oids": [commit] (oldest first)}"#)
             .when(need_commits),
         CommandSpec::new("revert.commit", "Revert Commit", "Graph › Commit Menu", revert)
             .params(r#"{"oid"?: commit (default: selected)}"#)

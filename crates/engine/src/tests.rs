@@ -668,3 +668,45 @@ fn git_flow_feature_and_release() {
     assert!(repo.root().join("login.txt").exists());
     assert!(s.run("gitflow.start", &json!({"kind": "bugfix", "name": "x"})).is_err());
 }
+
+#[test]
+fn stash_extras_multi_select_and_remotes() {
+    let (d, mut s) = session("eng-extras");
+    let repo = s.repo().unwrap().clone();
+    write(&repo, "README.md", "a\n").unwrap();
+    write(&repo, "src/main.rs", "b\n").unwrap();
+    run(&mut s, "repo.refresh", json!({}));
+    run(&mut s, "stash.save", json!({"message": "only readme", "paths": ["README.md"]}));
+    assert!(s.data.status.file("README.md").is_none());
+    assert!(s.data.status.file("src/main.rs").is_some());
+    run(&mut s, "stash.save", json!({"message": "the rest"}));
+    run(&mut s, "stash.rename", json!({"index": 1, "message": "renamed"}));
+    assert_eq!(s.data.stashes.len(), 2);
+    assert!(s.data.stashes[0].message.contains("renamed"), "{:?}", s.data.stashes);
+    // A stash's changes, through compare.
+    let r = run(&mut s, "diff.compare", json!({"from": "stash@{0}^1", "to": "stash@{0}"}));
+    assert_eq!(r["files"][0]["path"], json!("README.md"));
+    run(&mut s, "diff.compareClear", json!({}));
+    // Delete several branches at once; undo brings both back.
+    run(&mut s, "branch.create", json!({"name": "a", "checkout": false}));
+    run(&mut s, "branch.create", json!({"name": "b", "checkout": false}));
+    let r = run(&mut s, "branch.delete", json!({"names": ["a", "b", "nope"]}));
+    assert_eq!(r["deleted"], json!(["a", "b"]));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.data.local_branches().any(|r| r.name == "a") && s.data.local_branches().any(|r| r.name == "b"));
+    // Cherry-pick several commits.
+    run(&mut s, "branch.create", json!({"name": "two", "from": "feature"}));
+    write(&repo, "t.txt", "t\n").unwrap();
+    run(&mut s, "commit.stageAllAndCommit", json!({"summary": "T"}));
+    let picks = vec![repo.resolve("two~1").unwrap(), repo.resolve("two").unwrap()];
+    run(&mut s, "branch.checkout", json!({"name": "main"}));
+    run(&mut s, "cherryPick.commit", json!({"oids": picks}));
+    assert_eq!(s.data.commits[0].summary, "T");
+    // Remotes: rename, change the URL.
+    let up = d.path().join("up").to_string_lossy().into_owned();
+    run(&mut s, "remote.add", json!({"name": "origin", "url": up}));
+    run(&mut s, "remote.editUrl", json!({"name": "origin", "url": "/elsewhere"}));
+    assert_eq!(repo.config("remote.origin.url").as_deref(), Some("/elsewhere"));
+    run(&mut s, "remote.rename", json!({"from": "origin", "to": "upstream"}));
+    assert_eq!(s.data.remotes[0].name, "upstream");
+}

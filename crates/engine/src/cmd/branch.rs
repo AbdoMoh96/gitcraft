@@ -89,14 +89,41 @@ fn checkout_commit(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"message": format!("Checked out {} (detached HEAD)", oid.get(..7).unwrap_or(&oid)), "oid": oid}))
 }
 
+/// Delete one branch (`name`) or several (`names`); undoable as one step.
 fn delete(s: &mut Session, v: &Value) -> CmdResult {
-    let name = p::req_str(v, "name")?.trim().to_string();
+    let names: Vec<String> = match v.get("names").and_then(Value::as_array) {
+        Some(a) => a.iter().filter_map(Value::as_str).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).take(500).collect(),
+        None => vec![p::req_str(v, "name")?.trim().to_string()],
+    };
+    if names.is_empty() {
+        return Err(CmdError::Params("`names` is empty".into()));
+    }
     let force = p::bool(v, "force").unwrap_or(false);
     let repo = s.repo()?.clone();
-    let oid = repo.resolve(&format!("refs/heads/{name}")).ok_or_else(|| CmdError::Params(format!("no local branch `{name}`")))?;
-    repo.delete_branch(&name, force)?;
-    s.push_undo(UndoStep::BranchDelete { name: name.clone(), oid });
-    done(format!("Deleted branch {name}"))
+    let mut steps = Vec::new();
+    let mut failed = Vec::new();
+    for name in &names {
+        let Some(oid) = repo.resolve(&format!("refs/heads/{name}")) else {
+            failed.push(format!("{name}: no such local branch"));
+            continue;
+        };
+        match repo.delete_branch(name, force) {
+            Ok(()) => steps.push(UndoStep::BranchDelete { name: name.clone(), oid }),
+            Err(e) => failed.push(format!("{name}: {e}")),
+        }
+    }
+    let deleted: Vec<String> =
+        steps.iter().filter_map(|st| if let UndoStep::BranchDelete { name, .. } = st { Some(name.clone()) } else { None }).collect();
+    match steps.len() {
+        0 => return Err(CmdError::Failed(failed.join("; "))),
+        1 => s.push_undo(steps.remove(0)),
+        n => s.push_undo(UndoStep::Many(format!("Delete {n} branches"), steps)),
+    }
+    let mut message = if deleted.len() == 1 { format!("Deleted branch {}", deleted.join("")) } else { format!("Deleted {} branches", deleted.len()) };
+    if !failed.is_empty() {
+        message.push_str(&format!("; not deleted: {}", failed.join("; ")));
+    }
+    Ok(json!({"message": message, "deleted": deleted, "failed": failed}))
 }
 
 fn rename(s: &mut Session, v: &Value) -> CmdResult {
@@ -144,7 +171,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(r#"{"oid"?: commit (default: the selected one)}"#)
             .when(need_commits),
         CommandSpec::new("branch.delete", "Delete Branch", "Left Panel › Branches", delete)
-            .params(r#"{"name": string, "force"?: bool}"#)
+            .params(r#"{"name": string, "force"?: bool} | {"names": [string], "force"?: bool}"#)
             .when(need_commits),
         CommandSpec::new("branch.rename", "Rename Branch", "Left Panel › Branches", rename)
             .params(r#"{"from"?: string (default: current), "to": string}"#)

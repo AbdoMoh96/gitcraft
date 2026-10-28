@@ -133,6 +133,16 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
             app.dialog = Dialog::named("repo.init", &app.session, &json!({}));
             ui.close();
         }
+        if !app.prefs.favorites.is_empty() {
+            ui.separator();
+            ui.label(RichText::new("FAVOURITES").small().weak());
+            for p in app.prefs.favorites.clone().iter().take(10) {
+                if ui.button(p).clicked() {
+                    let _ = app.open_repo(std::path::Path::new(p));
+                    ui.close();
+                }
+            }
+        }
         if !app.prefs.recent.is_empty() {
             ui.separator();
             ui.label(RichText::new("RECENT").small().weak());
@@ -148,6 +158,12 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
             ui.separator();
             if ui.button("Show in File Manager").clicked() {
                 let _ = app.ui_command("ui.revealRepo", &json!({}));
+                ui.close();
+            }
+            let here = app.session.repo.as_ref().map(|r| r.root().display().to_string()).unwrap_or_default();
+            let fav = app.prefs.favorites.contains(&here);
+            if ui.button(if fav { "Remove from Favourites" } else { "Add to Favourites" }).clicked() {
+                app.toggle_favorite(&here);
                 ui.close();
             }
             if ui.button("Refresh").clicked() {
@@ -294,6 +310,7 @@ pub fn status_bar(app: &mut GitApp, ui: &mut egui::Ui) {
                     ui.label(RichText::new(first).small().color(c)).on_hover_text(&toast.text);
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    activity_button(app, ui);
                     if let Some(repo) = &app.session.repo {
                         ui.label(RichText::new(repo.root().display().to_string()).small().weak());
                         let d = &app.session.data;
@@ -307,4 +324,29 @@ pub fn status_bar(app: &mut GitApp, ui: &mut egui::Ui) {
                 });
             });
         });
+}
+
+/// The notifications list: every result and error of this session, newest first.
+fn activity_button(app: &mut GitApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    let errors = app.session.activity.iter().rev().take(20).filter(|a| !a.ok).count();
+    let label =
+        if errors > 0 { RichText::new(format!("Activity ({errors} failed)")).small().color(t.danger) } else { RichText::new("Activity").small() };
+    ui.menu_button(label, |ui| {
+        ui.set_min_width(420.0);
+        if app.session.activity.is_empty() {
+            ui.label(RichText::new("Nothing has happened yet").weak());
+            return;
+        }
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+            for a in app.session.activity.iter().rev().take(200) {
+                ui.horizontal_wrapped(|ui| {
+                    let c = if a.ok { t.added } else { t.danger };
+                    ui.label(RichText::new(if a.ok { "OK" } else { "FAILED" }).small().strong().color(c));
+                    ui.label(RichText::new(a.label.as_str()).small().strong());
+                    ui.label(RichText::new(a.message.lines().next().unwrap_or("")).small()).on_hover_text(a.message.as_str());
+                });
+            }
+        });
+    });
 }
