@@ -652,11 +652,26 @@ pub fn color(k: Kind, t: Tokens) -> Color32 {
 
 /// A line laid out with syntax colours (when `lang` is given) and `marked` ranges on `mark_bg`.
 pub fn line_job(text: &str, lang: Option<&Lang>, marked: &[Range<usize>], mark_bg: Color32, base: Color32, font: FontId, t: Tokens) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    append_line(&mut job, text, lang, marked, mark_bg, base, font, t);
+    job
+}
+
+/// [`line_job`], appended to `job`.
+pub fn append_line(
+    job: &mut LayoutJob,
+    text: &str,
+    lang: Option<&Lang>,
+    marked: &[Range<usize>],
+    mark_bg: Color32,
+    base: Color32,
+    font: FontId,
+    t: Tokens,
+) {
     let runs = match lang {
         Some(l) => tokens(text, l),
         None => vec![(0..text.len(), Kind::Plain)],
     };
-    let mut job = LayoutJob::default();
     // Cut the syntax runs at the marked ranges' edges.
     let mut cuts: Vec<usize> = vec![0, text.len()];
     for (r, _) in &runs {
@@ -679,7 +694,6 @@ pub fn line_job(text: &str, lang: Option<&Lang>, marked: &[Range<usize>], mark_b
         let fmt = TextFormat { font_id: font.clone(), color: fg, background: if on { mark_bg } else { Color32::TRANSPARENT }, ..Default::default() };
         job.append(piece, 0.0, fmt);
     }
-    job
 }
 
 #[cfg(test)]

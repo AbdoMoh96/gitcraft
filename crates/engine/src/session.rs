@@ -251,7 +251,7 @@ impl RepoData {
 }
 
 /// The settings loaded with each reload (see [`RepoData::config`]).
-const CONFIG_KEYS: &str = r"^(user\.(name|email|signingkey)|commit\.(gpgsign|template)|gpg\.format|gitcraft\..*|gitflow\..*)$";
+const CONFIG_KEYS: &str = r"^(user\.(name|email|signingkey)|commit\.(gpgsign|template)|gpg\.format|diff\.tool|merge\.tool|gitcraft\..*|gitflow\..*)$";
 
 impl RepoData {
     /// A loaded setting (key in lower case).

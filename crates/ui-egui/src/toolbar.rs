@@ -161,6 +161,26 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
         }
         ui.separator();
         if app.session.repo.is_some() {
+            ui.menu_button("Tools", |ui| {
+                for (name, label) in [
+                    ("patch.apply", "Apply Patch…"),
+                    ("patch.create", "Patch of the Uncommitted Changes…"),
+                    ("gitflow.init", "Git Flow…"),
+                    ("lfs.list", "Git LFS…"),
+                    ("hooks.list", "Git Hooks…"),
+                ] {
+                    if ui.button(label).clicked() {
+                        let params = if name == "patch.create" { json!({"oid": null}) } else { json!({}) };
+                        app.dialog = Dialog::named(name, &app.session, &params);
+                        if name == "patch.create"
+                            && let Some(Dialog::SavePatch { oid, .. }) = app.dialog.as_mut()
+                        {
+                            *oid = None;
+                        }
+                        ui.close();
+                    }
+                }
+            });
             for (name, label) in [("config.identity", "Author Identity…"), ("config.signing", "Commit Signing…")] {
                 if ui.button(label).clicked() {
                     app.dialog = Dialog::named(name, &app.session, &json!({}));

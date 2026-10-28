@@ -326,6 +326,10 @@ fn header(ui: &mut egui::Ui, m: &mut MergeTool, run: &mut Option<(&'static str, 
                     "Take Incoming",
                 ));
             }
+            ui.separator();
+            if ui.button("External Merge Tool").on_hover_text("Open the file in the merge tool set in git (merge.tool)").clicked() {
+                *run = Some(("tool.merge", json!({"path": m.path})));
+            }
         });
     });
 }

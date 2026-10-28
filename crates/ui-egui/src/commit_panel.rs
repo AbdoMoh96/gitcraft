@@ -172,6 +172,33 @@ fn compare(app: &mut GitApp, ui: &mut egui::Ui, from: &str, to: Option<&str>) {
     }
 }
 
+/// Open, edit or show a work tree file (menu items).
+pub fn file_actions(app: &mut GitApp, ui: &mut egui::Ui, path: &str, exists: bool) {
+    if !exists {
+        return;
+    }
+    ui.separator();
+    if ui.button("Edit in GitCraft").clicked() {
+        if let Err(e) = app.ui_command("ui.editFile", &json!({"path": path})) {
+            app.status(e, true);
+        }
+        ui.close();
+    }
+    for (id, label) in [("ui.openInEditor", "Open in Editor"), ("ui.openFile", "Open with Default App"), ("ui.revealFile", "Show in File Manager")] {
+        if ui.button(label).clicked() {
+            if let Err(e) = app.ui_command(id, &json!({"path": path})) {
+                app.status(e, true);
+            }
+            ui.close();
+        }
+    }
+    if app.session.data.setting("diff.tool").is_some() && ui.button("External Diff Tool").clicked() {
+        let _ = app.run("tool.diff", json!({"path": path}));
+        ui.close();
+    }
+    ui.separator();
+}
+
 fn section(ui: &mut egui::Ui, title: &str, count: usize, button: Option<(&str, Option<&'static str>)>) -> bool {
     let mut clicked = false;
     ui.horizontal(|ui| {
@@ -306,6 +333,31 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                     }
+                    if !conflict {
+                        ui.menu_button("Ignore", |ui| {
+                            if ui.button(format!("Ignore {}", f.path)).clicked() {
+                                run = Some(("file.ignore", json!({"path": f.path})));
+                                ui.close();
+                            }
+                            if let Some((_, ext)) = f.path.rsplit_once('.').filter(|(_, e)| !e.contains('/') && !e.is_empty())
+                                && ui.button(format!("Ignore all .{ext} files")).clicked()
+                            {
+                                run = Some(("file.ignore", json!({"path": f.path, "extension": true})));
+                                ui.close();
+                            }
+                            if let Some((dir, _)) = f.path.rsplit_once('/')
+                                && ui.button(format!("Ignore the folder {dir}/")).clicked()
+                            {
+                                run = Some(("file.ignore", json!({"pattern": format!("{}/", gitcraft_engine::git::tools::ignore_pattern_for(dir))})));
+                                ui.close();
+                            }
+                            if ui.button("Exclude in This Clone Only").on_hover_text("Adds it to .git/info/exclude, which isn't shared").clicked() {
+                                run = Some(("file.ignore", json!({"path": f.path, "local": true})));
+                                ui.close();
+                            }
+                        });
+                    }
+                    file_actions(app, ui, &f.path, f.worktree != Change::Deleted);
                     if ui.button("Copy Path").clicked() {
                         app.copy(f.path.clone());
                         ui.close();
@@ -342,6 +394,7 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
                         run = Some(("unstage.file", json!({"path": f.path})));
                         ui.close();
                     }
+                    file_actions(app, ui, &f.path, f.index != Change::Deleted);
                     if ui.button("Copy Path").clicked() {
                         app.copy(f.path.clone());
                         ui.close();

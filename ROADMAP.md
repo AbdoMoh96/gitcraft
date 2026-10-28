@@ -13,6 +13,17 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M5.** Tools. Ignore (`file.ignore`: the file, its extension, its folder, or only in
+  this clone through `.git/info/exclude`). Edit in GitCraft (`file.edit`: an editor in the center with
+  syntax colours, Mod+S saves) and Open in Editor / with the Default App / Show in File Manager
+  (`ui.openInEditor`, `ui.openFile`, `ui.revealFile`; the editor command is in Preferences). Patches
+  (`patch.create`: a commit as a mail patch or the uncommitted changes, to a file or the clipboard;
+  `patch.apply`: `git am --3way` for mail patches, else `git apply --3way`). Git LFS (`lfs.list`,
+  `lfs.track`, `lfs.untrack`, `lfs.pull`). Git Flow (`gitflow.init`, `gitflow.start`,
+  `gitflow.finish`: done by GitCraft with git-flow's config keys; a release is merged into main,
+  tagged, and the tag merged back into develop). Git Hooks (`hooks.list`, on / off, read and write a
+  script). External diff and merge tools (`tool.diff`, `tool.merge`: git's configured tool, started
+  without waiting).
 - **2026-10-28 — M5.** Submodules and worktrees in the left panel. Submodules (`submodule.list`) show
   whether each is cloned, changed or in conflict; Update / Clone (`submodule.update`, in the
   background), Add Submodule (`submodule.add`), Sync URLs, Remove (`submodule.remove`), and a

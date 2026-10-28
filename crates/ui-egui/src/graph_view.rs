@@ -958,6 +958,12 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
         }
         ui.label(egui::RichText::new(format!("Tip: {}-click a second commit", util::shortcut_label("Mod"))).small().weak());
     });
+    if item(ui, "patch.create", "Create Patch…") {
+        if let Some(d) = Dialog::named("patch.create", &app.session, &json!({"oid": c.oid})) {
+            actions.push(Action::Dialog(d));
+        }
+        ui.close();
+    }
     if ui.button(format!("Highlight Commits by {}", c.author.name)).clicked() {
         actions.push(Action::Run("view.search", json!({"text": c.author.email})));
         ui.close();

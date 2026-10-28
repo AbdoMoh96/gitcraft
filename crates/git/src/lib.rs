@@ -21,6 +21,7 @@ pub mod ssh;
 pub mod stash;
 pub mod status;
 pub mod testing;
+pub mod tools;
 
 pub use blame::{Blame, BlameCommit, BlameLine};
 pub use conflict::Chunk;

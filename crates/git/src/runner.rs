@@ -145,6 +145,16 @@ impl Git {
         Ok(Output { stdout: out, stderr: String::from_utf8_lossy(&err).into_owned(), code: status.code() })
     }
 
+    /// Start git (an external tool it launches) and don't wait: its output is dropped and it is
+    /// reaped on a thread when it exits.
+    pub fn spawn_detached(&self, dir: &Path, args: &[&str]) -> Result<()> {
+        let mut c = self.command(Some(dir));
+        c.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut child = c.spawn().map_err(|e| GitError::NotFound(format!("{}: {e}", self.bin.display())))?;
+        let _ = std::thread::Builder::new().name("gitcraft tool".into()).spawn(move || child.wait());
+        Ok(())
+    }
+
     /// Run and require success.
     pub fn run_ok(&self, dir: Option<&Path>, args: &[&str], input: Option<&[u8]>) -> Result<Output> {
         let o = self.run_in(dir, args, input)?;

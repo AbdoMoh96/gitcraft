@@ -71,6 +71,31 @@ pub enum Dialog {
         url: String,
         path: String,
     },
+    /// Save a commit (or the uncommitted changes) as a patch file.
+    SavePatch {
+        oid: Option<String>,
+        path: String,
+    },
+    ApplyPatch {
+        path: String,
+        commit: bool,
+    },
+    /// Git Flow: set it up, start and finish feature, release and hotfix branches.
+    GitFlow {
+        kind: String,
+        name: String,
+        main: String,
+        develop: String,
+    },
+    Lfs {
+        pattern: String,
+        /// `lfs.list`'s answer (asked again after each change).
+        info: Value,
+    },
+    Hooks {
+        selected: String,
+        script: String,
+    },
     AddWorktree {
         path: String,
         branch: String,
@@ -159,6 +184,34 @@ impl Dialog {
                     .collect();
                 Dialog::Rebase { oid, rows }
             }
+            "patch.create" => {
+                let oid = st("oid").or(selected);
+                let short = oid.as_deref().map(|o| o.get(..7).unwrap_or(o).to_string()).unwrap_or_else(|| "changes".into());
+                let dir = s.repo.as_ref().and_then(|r| r.root().parent().map(|p| p.to_path_buf())).unwrap_or_default();
+                Dialog::SavePatch { path: dir.join(format!("{short}.patch")).display().to_string(), oid }
+            }
+            "patch.apply" => Dialog::ApplyPatch { path: st("path").unwrap_or_default(), commit: true },
+            "gitflow.init" => Dialog::GitFlow {
+                kind: "feature".into(),
+                name: String::new(),
+                main: s.data.setting("gitflow.branch.master").map(str::to_string).unwrap_or_else(|| {
+                    if s.data.local_branches().any(|r| r.name == "master") && !s.data.local_branches().any(|r| r.name == "main") {
+                        "master".into()
+                    } else {
+                        "main".into()
+                    }
+                }),
+                develop: s.data.setting("gitflow.branch.develop").unwrap_or("develop").to_string(),
+            },
+            "lfs.list" => {
+                let r = s.repo.as_ref()?;
+                let available = r.lfs_available();
+                Dialog::Lfs {
+                    pattern: String::new(),
+                    info: json!({"available": available, "patterns": r.lfs_patterns(), "files": if available { r.lfs_files().unwrap_or_default() } else { Vec::new() }}),
+                }
+            }
+            "hooks.list" => Dialog::Hooks { selected: String::new(), script: String::new() },
             "submodule.add" => Dialog::AddSubmodule { url: st("url").unwrap_or_default(), path: st("path").unwrap_or_default() },
             "worktree.add" => {
                 Dialog::AddWorktree { path: st("path").unwrap_or_default(), branch: st("branch").unwrap_or_default(), new_branch: true }
@@ -227,6 +280,11 @@ impl Dialog {
             Dialog::Diverged { .. } => "diverged",
             Dialog::Rebase { .. } => "rebase.interactive",
             Dialog::AddSubmodule { .. } => "submodule.add",
+            Dialog::SavePatch { .. } => "patch.create",
+            Dialog::ApplyPatch { .. } => "patch.apply",
+            Dialog::GitFlow { .. } => "gitflow.init",
+            Dialog::Lfs { .. } => "lfs.list",
+            Dialog::Hooks { .. } => "hooks.list",
             Dialog::AddWorktree { .. } => "worktree.add",
             Dialog::Identity { .. } => "config.identity",
             Dialog::Signing { .. } => "config.signing",
@@ -561,6 +619,189 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
             }
         }
+        Dialog::SavePatch { oid, path } => {
+            ui.heading("Create Patch");
+            let what = match oid {
+                Some(o) => format!("Commit {} as a mail patch (author and message kept)", o.get(..7).unwrap_or(o)),
+                None => "The uncommitted changes".to_string(),
+            };
+            ui.label(RichText::new(what).small().color(t.dim));
+            ui.add_space(6.0);
+            field(ui, "SAVE TO", path, "/path/to/change.patch", first);
+            ui.horizontal(|ui| {
+                if ui.button("Copy to Clipboard Instead").clicked()
+                    && let Ok(v) = app.session.run("patch.create", &json!({"oid": oid}))
+                    && let Some(p) = v["patch"].as_str()
+                {
+                    app.copy(p.to_string());
+                    app.status("Copied the patch", false);
+                }
+            });
+            let (ok, cancel) = buttons(ui, "Save Patch", !path.trim().is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("patch.create".into(), json!({"oid": oid, "path": path.trim()}));
+            }
+        }
+        Dialog::ApplyPatch { path, commit } => {
+            ui.heading("Apply Patch");
+            ui.add_space(6.0);
+            field(ui, "PATCH FILE", path, "/path/to/change.patch", first);
+            ui.checkbox(commit, "Commit mail patches with their author and message (git am)");
+            let (ok, cancel) = buttons(ui, "Apply", !path.trim().is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("patch.apply".into(), json!({"path": path.trim(), "commit": *commit}));
+            }
+        }
+        Dialog::GitFlow { kind, name, main, develop } => {
+            ui.heading("Git Flow");
+            ui.add_space(6.0);
+            let ready = app.session.data.setting("gitflow.branch.develop").is_some();
+            if !ready {
+                ui.label("Feature branches start from a development branch; releases and hotfixes are merged into the main branch and tagged.");
+                field(ui, "MAIN BRANCH (releases)", main, "main", first);
+                field(ui, "DEVELOPMENT BRANCH (created when missing)", develop, "develop", false);
+                let (ok, cancel) = buttons(ui, "Set Up Git Flow", !main.trim().is_empty() && !develop.trim().is_empty(), false);
+                if cancel {
+                    return Close::Cancel;
+                }
+                if ok {
+                    let _ = app.run("gitflow.init", json!({"main": main.trim(), "develop": develop.trim()}));
+                }
+                return Close::Keep;
+            }
+            ui.label(
+                RichText::new(format!("main: {}   develop: {}", app.session.data.setting("gitflow.branch.master").unwrap_or("main"), develop))
+                    .small()
+                    .color(t.dim),
+            );
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                for k in ["feature", "release", "hotfix"] {
+                    ui.radio_value(kind, k.to_string(), k);
+                }
+            });
+            field(ui, "NAME", name, if kind == "feature" { "login-page" } else { "1.2.0" }, false);
+            let current = app.session.data.status.branch.clone().unwrap_or_default();
+            let prefix = app.session.data.setting(&format!("gitflow.prefix.{kind}")).unwrap_or("").to_string();
+            let on_one = !prefix.is_empty() && current.starts_with(&prefix);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!name.trim().is_empty(), egui::Button::new(format!("Start {kind}"))).clicked() {
+                    let _ = app.run("gitflow.start", json!({"kind": kind, "name": name.trim()}));
+                }
+                let finish_name = if name.trim().is_empty() && on_one { current.clone() } else { name.trim().to_string() };
+                if ui
+                    .add_enabled(!finish_name.is_empty(), egui::Button::new(format!("Finish {kind}")))
+                    .on_hover_text(if kind == "feature" {
+                        "Merge into develop and delete the branch"
+                    } else {
+                        "Merge into main, tag it, merge back into develop, delete the branch"
+                    })
+                    .clicked()
+                {
+                    let _ = app.run("gitflow.finish", json!({"kind": kind, "name": finish_name}));
+                }
+            });
+            if on_one {
+                ui.label(RichText::new(format!("{current} is checked out: Finish uses it when the name is empty.")).small().color(t.dim));
+            }
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
+            }
+        }
+        Dialog::Lfs { pattern, info } => {
+            ui.heading("Git LFS");
+            ui.add_space(6.0);
+            let mut changed = false;
+            if info["available"] != json!(true) {
+                ui.label(RichText::new("git lfs isn't installed: get it from git-lfs.com, then come back.").color(t.warning));
+            }
+            ui.label(RichText::new("STORED WITH LFS").small().strong());
+            let pats: Vec<String> =
+                info["patterns"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            if pats.is_empty() {
+                ui.label(RichText::new("No patterns yet").weak());
+            }
+            for pat in pats {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&pat).monospace());
+                    if ui.small_button("Stop").clicked() {
+                        let _ = app.run("lfs.untrack", json!({"pattern": pat}));
+                        changed = true;
+                    }
+                });
+            }
+            if changed && let Some(Dialog::Lfs { info: fresh, .. }) = Dialog::named("lfs.list", &app.session, &json!({})) {
+                *info = fresh;
+            }
+            let n = info["files"].as_array().map(Vec::len).unwrap_or(0);
+            ui.label(RichText::new(format!("{n} file{} in LFS", if n == 1 { "" } else { "s" })).small().color(t.dim));
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(pattern).hint_text("*.psd").desired_width(200.0));
+                if ui.add_enabled(!pattern.trim().is_empty(), egui::Button::new("Track")).clicked() {
+                    let _ = app.run("lfs.track", json!({"pattern": pattern.trim()}));
+                    pattern.clear();
+                    changed = true;
+                }
+                if ui.button("Pull LFS Files").clicked() {
+                    let _ = app.run("lfs.pull", json!({}));
+                }
+            });
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
+            }
+        }
+        Dialog::Hooks { selected, script } => {
+            ui.set_width(560.0);
+            ui.heading("Git Hooks");
+            ui.label(RichText::new("Scripts git runs at points like committing or pushing.").small().color(t.dim));
+            ui.add_space(6.0);
+            let hooks = app.session.repo.as_ref().map(|r| r.hooks()).unwrap_or_default();
+            let mut pick: Option<String> = None;
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(190.0);
+                    egui::ScrollArea::vertical().id_salt("hooks").max_height(300.0).show(ui, |ui| {
+                        for name in gitcraft_engine::git::tools::HOOK_NAMES {
+                            let h = hooks.iter().find(|h| h.name == *name);
+                            ui.horizontal(|ui| {
+                                let mut on = h.is_some_and(|h| h.enabled);
+                                if ui.add_enabled(h.is_some(), egui::Checkbox::without_text(&mut on)).on_hover_text("On / off").changed() {
+                                    let _ = app.run("hooks.enable", json!({"name": name, "value": on}));
+                                }
+                                let label = if h.is_some_and(|h| h.sample) { RichText::new(*name).color(t.dim) } else { RichText::new(*name) };
+                                if ui.selectable_label(selected == name, label).clicked() {
+                                    pick = Some(name.to_string());
+                                }
+                            });
+                        }
+                    });
+                });
+                ui.vertical(|ui| {
+                    if selected.is_empty() {
+                        ui.label(RichText::new("Pick a hook to read or write it.").weak());
+                    } else {
+                        ui.add(egui::TextEdit::multiline(script).code_editor().desired_rows(16).desired_width(f32::INFINITY));
+                        if ui.button(format!("Save {selected} (and turn it on)")).clicked() {
+                            let _ = app.run("hooks.write", json!({"name": selected, "script": script}));
+                        }
+                    }
+                });
+            });
+            if let Some(n) = pick {
+                *script = app.session.repo.as_ref().and_then(|r| r.read_hook(&n).ok()).unwrap_or_else(|| "#!/bin/sh\n".into());
+                *selected = n;
+            }
+            let close = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.button("Close").clicked()).inner;
+            if close || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                return Close::Cancel;
+            }
+        }
         Dialog::AddWorktree { path, branch, new_branch } => {
             ui.heading("Add Worktree");
             ui.label(RichText::new("Another folder with its own checkout of this repository.").small().color(t.dim));
@@ -782,6 +1023,10 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                     .desired_width(f32::INFINITY),
             )
             .on_hover_text("The command that opens a terminal; {dir} is the repository's folder");
+            ui.add_space(6.0);
+            ui.label(RichText::new("EDITOR").small().strong());
+            ui.add(egui::TextEdit::singleline(&mut app.prefs.editor).hint_text("System default (e.g. code -g {file})").desired_width(f32::INFINITY))
+                .on_hover_text("The command that opens a file; {file} is its path");
             ui.add_space(6.0);
             let git = app.session.git.version().unwrap_or_else(|e| e.to_string());
             ui.label(RichText::new(git).small().weak());

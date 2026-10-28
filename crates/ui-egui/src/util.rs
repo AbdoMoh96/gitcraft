@@ -133,6 +133,48 @@ pub fn reveal(path: &Path) -> Result<(), String> {
     std::process::Command::new(prog).arg(path).spawn().map(|_| ()).map_err(|e| format!("{prog}: {e}"))
 }
 
+/// Open a file with the system's default app.
+pub fn open_path(path: &Path) -> Result<(), String> {
+    let mut c = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    c.arg(path).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut child = c.spawn().map_err(|e| format!("opening {}: {e}", path.display()))?;
+    let _ = std::thread::Builder::new().name("gitcraft open".into()).spawn(move || child.wait());
+    Ok(())
+}
+
+/// Open a file in the editor set in Preferences (`code -g {file}`; `{file}` is the file's path,
+/// added at the end when missing), else with the system's default app.
+pub fn open_in_editor(path: &Path, custom: &str) -> Result<(), String> {
+    let custom = custom.trim();
+    if custom.is_empty() {
+        return open_path(path);
+    }
+    let file = path.display().to_string();
+    let mut parts = custom.split_whitespace();
+    let prog = parts.next().ok_or("no editor is set")?;
+    let mut args: Vec<String> = parts.map(|a| a.replace("{file}", &file)).collect();
+    if !custom.contains("{file}") {
+        args.push(file);
+    }
+    let mut child = std::process::Command::new(prog)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("{prog}: {e}"))?;
+    let _ = std::thread::Builder::new().name("gitcraft editor".into()).spawn(move || child.wait());
+    Ok(())
+}
+
 /// Whether `prog` is a program on the PATH.
 fn on_path(prog: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else { return false };

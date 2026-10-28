@@ -12,6 +12,7 @@ pub mod conflict_alert;
 pub mod control;
 pub mod dialogs;
 pub mod diff_view;
+pub mod editor;
 pub mod graph_view;
 pub mod highlight;
 pub mod icons;
@@ -67,6 +68,8 @@ pub struct Prefs {
     pub conflict_check: bool,
     /// Interface zoom (1.0 = 100%).
     pub zoom: f32,
+    /// The command that opens a file in an editor (`code -g {file}`); empty: the system's app.
+    pub editor: String,
 }
 
 impl Default for Prefs {
@@ -83,6 +86,7 @@ impl Default for Prefs {
             active_tab: 0,
             conflict_check: true,
             zoom: 1.0,
+            editor: String::new(),
         }
     }
 }
@@ -172,6 +176,8 @@ pub struct GitApp {
     pub conflict_alert: conflict_alert::ConflictAlert,
     /// Changed words of the diff on screen: (path, area, generation, context, whitespace) → cache.
     pub words: ((String, String, u64, u32, bool), diff_view::WordCache),
+    /// A work tree file open in the in-app editor.
+    pub editor: Option<editor::Editor>,
     /// The graph's overview marks: (generation, search) → marks.
     pub minimap: Option<((u64, String), graph_view::MinimapMarks)>,
     /// The zoom applied last frame (to notice egui's own zoom keys).
@@ -229,6 +235,7 @@ impl GitApp {
             words: Default::default(),
             zoom_seen: 1.0,
             minimap: None,
+            editor: None,
             images: None,
         }
     }
@@ -523,6 +530,33 @@ impl GitApp {
                 };
                 Ok(json!({"path": root.display().to_string(), "terminal": prog}))
             }
+            "ui.editFile" => {
+                let path =
+                    s("path").map(str::to_string).or_else(|| self.session.sel.file.as_ref().map(|f| f.path.clone())).ok_or("`path` is required")?;
+                self.edit_file(&path)?;
+                Ok(json!({"path": path}))
+            }
+            "ui.openFile" | "ui.openInEditor" | "ui.revealFile" => {
+                let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).ok_or("no repository is open")?;
+                let rel =
+                    s("path").map(str::to_string).or_else(|| self.session.sel.file.as_ref().map(|f| f.path.clone())).ok_or("`path` is required")?;
+                if rel.split(['/', '\\']).any(|c| c == "..") || Path::new(&rel).is_absolute() {
+                    return Err("the path must be inside the repository".into());
+                }
+                let full = root.join(&rel);
+                if !full.exists() {
+                    return Err(format!("{rel} isn't in the work tree"));
+                }
+                // Unit tests run every UI command: they must not open windows.
+                if !cfg!(test) {
+                    match id {
+                        "ui.openFile" => util::open_path(&full)?,
+                        "ui.openInEditor" => util::open_in_editor(&full, &self.prefs.editor)?,
+                        _ => util::reveal(full.parent().unwrap_or(&root))?,
+                    }
+                }
+                Ok(json!({"path": full.display().to_string()}))
+            }
             "ui.revealRepo" => {
                 let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).ok_or("no repository is open")?;
                 util::reveal(&root)?;
@@ -786,7 +820,9 @@ impl GitApp {
             }
             commit_panel::show(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(&ctx).bg)).show(ui, |ui| {
-                if let Some(path) = self.conflicted_selection() {
+                if self.editor.is_some() {
+                    editor::show(self, ui);
+                } else if let Some(path) = self.conflicted_selection() {
                     merge_tool::show(self, ui, &path);
                 } else if self.session.sel.file.is_some() {
                     self.merge = None;

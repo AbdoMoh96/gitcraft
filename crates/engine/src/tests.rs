@@ -609,3 +609,62 @@ fn worktrees_from_commands() {
     assert!(s.run("submodule.update", &json!({})).is_err(), "no submodules");
     assert_eq!(run(&mut s, "submodule.list", json!({}))["submodules"], json!([]));
 }
+
+#[test]
+fn tools_ignore_edit_patch_hooks() {
+    let (d, mut s) = session("eng-tools");
+    let repo = s.repo().unwrap().clone();
+    write(&repo, "build/out.log", "x\n").unwrap();
+    write(&repo, "notes.tmp", "x\n").unwrap();
+    run(&mut s, "repo.refresh", json!({}));
+    run(&mut s, "file.ignore", json!({"path": "build/out.log"}));
+    run(&mut s, "file.ignore", json!({"path": "notes.tmp", "extension": true, "local": true}));
+    let left: Vec<&str> = s.data.status.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(left, [".gitignore"]);
+    assert!(s.run("file.ignore", &json!({"path": "../x"})).is_err());
+    run(&mut s, "file.edit", json!({"path": "src/new.rs", "content": "fn x() {}\n"}));
+    assert!(s.data.status.file("src/new.rs").is_some());
+    assert!(s.run("file.edit", &json!({"path": "/etc/x", "content": ""})).is_err());
+    assert!(s.run("file.edit", &json!({"path": "src", "content": ""})).is_err(), "a folder");
+    // A patch of a commit, written to a file and applied on another branch.
+    let out = d.path().join("feature.patch").to_string_lossy().into_owned();
+    run(&mut s, "patch.create", json!({"oid": "feature", "path": out}));
+    assert!(s.run("patch.create", &json!({"oid": "feature", "path": out})).is_err(), "never overwrites");
+    run(&mut s, "commit.stageAllAndCommit", json!({"summary": "wip"}));
+    run(&mut s, "patch.apply", json!({"path": out}));
+    assert_eq!(s.data.commits[0].summary, "Add a library");
+    let text = run(&mut s, "patch.create", json!({"oid": "HEAD"}))["patch"].as_str().unwrap().to_string();
+    assert!(text.contains("Subject: [PATCH] Add a library"));
+    // Hooks.
+    run(&mut s, "hooks.write", json!({"name": "commit-msg", "script": "#!/bin/sh\nexit 0\n"}));
+    let h = run(&mut s, "hooks.list", json!({}));
+    assert!(h["hooks"].as_array().unwrap().iter().any(|x| x["name"] == "commit-msg" && x["enabled"] == json!(true)));
+    run(&mut s, "hooks.enable", json!({"name": "commit-msg", "value": false}));
+    assert!(s.run("tool.diff", &json!({"path": "README.md"})).is_err(), "no diff.tool set");
+    let l = run(&mut s, "lfs.list", json!({}));
+    assert!(l["patterns"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn git_flow_feature_and_release() {
+    let (_d, mut s) = session("eng-flow");
+    assert!(s.run("gitflow.start", &json!({"kind": "feature", "name": "x"})).is_err(), "not set up");
+    // The sample has a branch named `feature`, so feature branches can't live under `feature/`.
+    run(&mut s, "gitflow.init", json!({"featurePrefix": "feat/"}));
+    assert!(s.data.local_branches().any(|r| r.name == "develop"));
+    run(&mut s, "gitflow.start", json!({"kind": "feature", "name": "login"}));
+    assert_eq!(s.data.status.branch.as_deref(), Some("feat/login"));
+    write(s.repo().unwrap(), "login.txt", "x\n").unwrap();
+    run(&mut s, "commit.stageAllAndCommit", json!({"summary": "Login"}));
+    let r = run(&mut s, "gitflow.finish", json!({"kind": "feature"}));
+    assert!(r["message"].as_str().unwrap().contains("deleted"), "{r}");
+    assert_eq!(s.data.status.branch.as_deref(), Some("develop"));
+    assert!(!s.data.local_branches().any(|r| r.name == "feat/login"));
+    run(&mut s, "gitflow.start", json!({"kind": "release", "name": "1.0"}));
+    run(&mut s, "gitflow.finish", json!({"kind": "release", "name": "1.0"}));
+    let repo = s.repo().unwrap().clone();
+    assert!(s.data.tags().any(|t| t.name == "1.0"));
+    assert!(repo.is_ancestor("1.0", "main") && repo.is_ancestor("1.0", "develop"));
+    assert!(repo.root().join("login.txt").exists());
+    assert!(s.run("gitflow.start", &json!({"kind": "bugfix", "name": "x"})).is_err());
+}

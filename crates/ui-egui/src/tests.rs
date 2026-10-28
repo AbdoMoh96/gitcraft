@@ -111,6 +111,11 @@ fn every_view_lays_out() {
         "commit.coAuthors",
         "submodule.add",
         "worktree.add",
+        "patch.create",
+        "patch.apply",
+        "gitflow.init",
+        "lfs.list",
+        "hooks.list",
         "shortcuts",
         "preferences",
     ] {

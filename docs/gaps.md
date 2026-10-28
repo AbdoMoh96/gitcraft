@@ -21,8 +21,9 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
    `ssh.keys` / `ssh.generate`.
 7. ~~Submodules and worktrees~~ — landed: `submodule.list/update/add/sync/remove`,
    `worktree.list/add/remove/prune`; left panel sections; open either in a tab.
-8. **Tools** — `file.ignore`, `patch.create`, `patch.apply`, `lfs.track`, `gitflow.init`, `hooks.list`,
-   `ui.terminal`, `file.edit`.
+8. ~~Tools~~ — landed: `file.ignore`, `file.edit` (in-app editor), `patch.create` / `patch.apply`,
+   `lfs.*`, `gitflow.init/start/finish` (native, git-flow's config keys), `hooks.*`, `tool.diff` /
+   `tool.merge` (git's configured tools, not waited for), open / edit / reveal a file.
 9. **Hosting integrations** — `pr.list`, `pr.create`, `issues.list`, `ci.list`, `integrations.connect`
    (needs a decision from the owner on accounts and tokens).
 10. **Workspaces, profiles, cloud** — `workspace.open`, `profile.switch`, `cloudpatch.create`,

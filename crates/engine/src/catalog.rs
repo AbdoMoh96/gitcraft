@@ -145,6 +145,13 @@ Tools|General|Git Flow|gitflow.init
 Tools|General|Git Hooks|hooks.list
 Tools|General|Create Patch|patch.create
 Tools|General|Apply Patch|patch.apply
+Tools|General|Open File in External Editor|ui.openInEditor
+Tools|General|Open File with Default App|ui.openFile
+Tools|General|Show File in File Manager|ui.revealFile
+Tools|General|External Diff Tool|tool.diff
+Tools|General|External Merge Tool|tool.merge
+Tools|General|Git Flow Start and Finish|gitflow.finish
+Tools|General|Edit Git Hooks|hooks.write
 Settings|Preferences|Interface Theme|ui.theme
 Settings|Preferences|Preferences|ui.preferences
 Settings|Preferences|Zoom|ui.zoom
@@ -167,6 +174,10 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.theme",
     "ui.preferences",
     "ui.zoom",
+    "ui.editFile",
+    "ui.openFile",
+    "ui.openInEditor",
+    "ui.revealFile",
 ];
 
 pub struct Entry {
@@ -241,7 +252,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 123;
+    const FLOOR: usize = 137;
 
     #[test]
     fn parity_floor() {

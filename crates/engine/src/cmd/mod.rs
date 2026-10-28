@@ -14,6 +14,7 @@ pub mod repo;
 pub mod stage;
 pub mod stash;
 pub mod tag;
+pub mod tools;
 pub mod view;
 
 use gitcraft_git::{Outcome, RepoState};
@@ -39,6 +40,7 @@ pub fn registry() -> Registry {
     v.extend(inspect::specs());
     v.extend(config::specs());
     v.extend(modules::specs());
+    v.extend(tools::specs());
     Registry::new(v)
 }
 

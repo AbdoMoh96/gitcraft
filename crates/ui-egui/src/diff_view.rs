@@ -134,6 +134,14 @@ fn header(app: &mut GitApp, ui: &mut egui::Ui, sel: &FileSel, run: &mut Option<(
                     }
                     Area::Commit(_) | Area::Compare { .. } => {}
                 }
+                if matches!(sel.area, Area::Unstaged | Area::Staged) {
+                    ui.menu_button("Open", |ui| crate::commit_panel::file_actions(app, ui, &sel.path, true));
+                    if icons::button(ui, Icon::Pencil, "Edit this file in GitCraft", None, 15.0).clicked()
+                        && let Err(e) = app.ui_command("ui.editFile", &json!({"path": sel.path}))
+                    {
+                        app.status(e, true);
+                    }
+                }
                 ui.separator();
                 if icons::button(ui, Icon::History, "File history", app.disabled("view.history"), 15.0).clicked() {
                     *run = Some(("view.history", json!({"path": sel.path})));
