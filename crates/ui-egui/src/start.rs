@@ -85,6 +85,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 });
             }
         }
+        ui.add_space(12.0);
+        if ui.button("New to Git? Learn with a practice repository…").clicked() {
+            app.dialog = Dialog::named("ui.learn", &app.session, &json!({}));
+        }
         ui.add_space(16.0);
         ui.label(
             RichText::new(format!("Or drop a folder on this window. {} finds any command.", crate::util::shortcut_label("Mod+P")))

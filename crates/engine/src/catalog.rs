@@ -90,6 +90,10 @@ Graph|Commit Menu|Cherry Pick Several Commits|cherryPick.commit
 Repository|Management|Favourite Repositories|ui.favorite
 Toolbar|Actions|Auto-fetch|ui.autoFetch
 Tools|General|Notifications|repo.activity
+Tools|General|Built-in Terminal|ui.terminal
+Tools|General|Reload When Files Change|repo.refresh
+Tools|General|Learn Git (Practice Repository and Lessons)|ui.learn
+Tools|General|Practice Repository|repo.practice
 Left Panel|Sections|Filter Branches|ui.filterRefs
 Left Panel|Sections|Toggle Left Panel|view.leftPanel
 Left Panel|Sections|Pull Requests|pr.list
@@ -199,6 +203,7 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.workspaces",
     "ui.profile",
     "ui.treeView",
+    "ui.learn",
 ];
 
 pub struct Entry {
@@ -273,7 +278,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 154;
+    const FLOOR: usize = 158;
 
     #[test]
     fn parity_floor() {

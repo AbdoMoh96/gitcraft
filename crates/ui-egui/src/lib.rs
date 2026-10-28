@@ -21,10 +21,12 @@ pub mod palette;
 pub mod refs_panel;
 pub mod start;
 pub mod tabs;
+pub mod terminal;
 pub mod theme;
 pub mod toasts;
 pub mod toolbar;
 pub mod util;
+pub mod watch;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -84,6 +86,8 @@ pub struct Prefs {
     pub active_profile: String,
     /// The commit panel groups files by folder.
     pub tree_view: bool,
+    /// The Terminal button opens the terminal panel inside GitCraft (else the desktop's terminal).
+    pub builtin_terminal: bool,
 }
 
 /// A named group of repositories.
@@ -128,6 +132,7 @@ impl Default for Prefs {
             profiles: Vec::new(),
             active_profile: String::new(),
             tree_view: false,
+            builtin_terminal: true,
         }
     }
 }
@@ -225,6 +230,15 @@ pub struct GitApp {
     pub picked_commits: Vec<String>,
     /// When the last automatic fetch started.
     last_auto_fetch: f64,
+    /// The built-in terminal (its shell keeps running while the panel is hidden).
+    pub terminal: Option<terminal::Terminal>,
+    pub terminal_open: bool,
+    /// The terminal had the keyboard last frame: app shortcuts stay out of its way.
+    pub terminal_focused: bool,
+    /// Give the terminal the keyboard on the next frame (it was just opened).
+    pub terminal_focus_request: bool,
+    /// File notifications for the open repository.
+    pub watcher: Option<watch::Watcher>,
     /// A work tree file open in the in-app editor.
     pub editor: Option<editor::Editor>,
     /// The graph's overview marks: (generation, search) → marks.
@@ -306,6 +320,11 @@ impl GitApp {
             zoom_seen: 1.0,
             minimap: None,
             editor: None,
+            terminal: None,
+            terminal_open: false,
+            terminal_focused: false,
+            terminal_focus_request: false,
+            watcher: None,
             picked_branches: Default::default(),
             picked_commits: Vec::new(),
             last_auto_fetch: util::now_s(),
@@ -619,6 +638,15 @@ impl GitApp {
                 self.open_repo(Path::new(&p))?;
                 Ok(json!({"path": p}))
             }
+            "ui.terminal" if self.prefs.builtin_terminal && !v.get("external").and_then(Value::as_bool).unwrap_or(false) => {
+                if self.session.repo.is_none() {
+                    return Err("no repository is open".into());
+                }
+                self.terminal_open = v.get("value").and_then(Value::as_bool).unwrap_or(!self.terminal_open);
+                self.terminal_focus_request = self.terminal_open;
+                let text = self.terminal.as_ref().map(|t| t.contents()).unwrap_or_default();
+                Ok(json!({"open": self.terminal_open, "builtin": true, "screen": text}))
+            }
             "ui.terminal" => {
                 let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf()).ok_or("no repository is open")?;
                 // Unit tests run every UI command: they must not open windows.
@@ -630,6 +658,10 @@ impl GitApp {
                 Ok(json!({"path": root.display().to_string(), "terminal": prog}))
             }
             "ui.workspaces" => self.workspaces_command(v),
+            "ui.learn" => {
+                self.dialog = Dialog::named("ui.learn", &self.session, v);
+                Ok(json!({"open": true}))
+            }
             "ui.treeView" => {
                 self.prefs.tree_view = v.get("value").and_then(Value::as_bool).unwrap_or(!self.prefs.tree_view);
                 Ok(json!({"value": self.prefs.tree_view}))
@@ -806,7 +838,13 @@ impl GitApp {
         self.shortcuts(ctx);
         let now = util::now_s();
         let focused = ctx.input(|i| i.focused);
-        if focused && (!self.was_focused || now - self.last_check > CHECK_EVERY_S) && self.jobs.is_empty() {
+        // Watch the open repository's folder: a change reloads right away.
+        let root = self.session.repo.as_ref().map(|r| r.root().to_path_buf());
+        if self.watcher.as_ref().map(|w| w.root().to_path_buf()) != root {
+            self.watcher = root.as_deref().filter(|_| !cfg!(test)).map(|r| watch::Watcher::new(r, ctx.clone()));
+        }
+        let touched = self.watcher.as_ref().is_some_and(|w| w.take());
+        if (touched || (focused && (!self.was_focused || now - self.last_check > CHECK_EVERY_S))) && self.jobs.is_empty() {
             self.last_check = now;
             match self.session.refresh_if_changed() {
                 Ok(true) => {
@@ -869,6 +907,13 @@ impl GitApp {
     /// make sense there (commit, palette) run.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         if self.dialog.is_some() || self.palette.is_some() {
+            return;
+        }
+        // Mod+` shows or hides the terminal; keys typed into it are the shell's.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Backtick)) {
+            let _ = self.ui_command("ui.terminal", &json!({}));
+        }
+        if self.terminal_focused && self.terminal_open {
             return;
         }
         let typing = ctx.egui_wants_keyboard_input();
@@ -942,6 +987,11 @@ impl GitApp {
         if self.session.repo.is_none() {
             egui::CentralPanel::default().show(ui, |ui| start::show(self, ui));
         } else {
+            if self.terminal_open {
+                terminal::show(self, ui);
+            } else {
+                self.terminal_focused = false;
+            }
             if self.session.view.left_panel {
                 refs_panel::show(self, ui);
             }

@@ -121,6 +121,7 @@ fn every_view_lays_out() {
         "ui.workspaces",
         "ui.profile",
         "repo.scan",
+        "ui.learn",
         "shortcuts",
         "preferences",
     ] {

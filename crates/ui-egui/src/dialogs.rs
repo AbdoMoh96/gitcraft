@@ -78,6 +78,10 @@ pub enum Dialog {
     Workspaces {
         name: String,
     },
+    /// Learn Git: a practice repository and lessons that tick off as they're done.
+    Learn {
+        path: String,
+    },
     Profiles {
         name: String,
         git_name: String,
@@ -156,6 +160,35 @@ pub enum Dialog {
     Shortcuts,
     Preferences,
 }
+
+/// The Learn Git lessons: a title, how to do it in GitCraft, and the commands that complete it.
+const LESSONS: &[(&str, &str, &[&str])] = &[
+    (
+        "Stage a change",
+        "Edit a file, then click it under Unstaged Files and press Stage File (or stage a single hunk or line in the diff).",
+        &["stage.file", "stage.all", "stage.hunk", "stage.lines"],
+    ),
+    ("Make a commit", "Write a summary in the commit panel and press Commit (Mod+Enter).", &["commit.create", "commit.stageAllAndCommit"]),
+    ("Undo it", "Press Undo in the toolbar: the commit goes away and its changes are staged again.", &["edit.undo"]),
+    ("Create a branch", "Press Branch in the toolbar, or right-click a commit and pick Create Branch Here.", &["branch.create"]),
+    ("Switch branches", "Double-click a branch in the left panel or the graph.", &["branch.checkout"]),
+    (
+        "Merge a branch",
+        "Drag a branch's label onto another branch in the graph and pick Merge, or right-click it.",
+        &["merge.into", "branch.dropOnto"],
+    ),
+    (
+        "Stash work for later",
+        "Press Stash to put uncommitted changes aside, and Pop to bring them back.",
+        &["stash.save", "stash.pop", "stash.apply"],
+    ),
+    (
+        "Rewrite history",
+        "Right-click a commit: Edit Commit Message, or Edit History › Interactive Rebase.",
+        &["commit.reword", "rebase.interactive", "commit.squash", "commit.drop"],
+    ),
+    ("Share with a remote", "Add a remote in the left panel, then Push and Pull from the toolbar.", &["remote.push", "remote.pull", "remote.fetch"]),
+];
 
 /// One commit in the interactive rebase dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -236,6 +269,7 @@ impl Dialog {
                 }
             }
             "hooks.list" => Dialog::Hooks { selected: String::new(), script: String::new() },
+            "ui.learn" | "learn" => Dialog::Learn { path: std::path::PathBuf::from(home()).join("gitcraft-practice").display().to_string() },
             "ui.workspaces" | "workspaces" => Dialog::Workspaces { name: String::new() },
             "ui.profile" | "profiles" => Dialog::Profiles { name: String::new(), git_name: String::new(), git_email: String::new() },
             "repo.scan" => Dialog::Scan { path: st("path").unwrap_or_else(home), found: Vec::new(), picked: Vec::new(), workspace: String::new() },
@@ -318,6 +352,7 @@ impl Dialog {
             Dialog::AddSubmodule { .. } => "submodule.add",
             Dialog::RenameStash { .. } => "stash.rename",
             Dialog::Workspaces { .. } => "ui.workspaces",
+            Dialog::Learn { .. } => "ui.learn",
             Dialog::Profiles { .. } => "ui.profile",
             Dialog::Scan { .. } => "repo.scan",
             Dialog::EditRemote { .. } => "remote.editUrl",
@@ -658,6 +693,43 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
             if ok {
                 return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
+            }
+        }
+        Dialog::Learn { path } => {
+            ui.set_width(560.0);
+            ui.heading("Learn Git with GitCraft");
+            ui.label(
+                RichText::new("Each lesson is ticked off when you've done it. Try them in a practice repository where nothing can break.")
+                    .small()
+                    .color(t.dim),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(path).desired_width(330.0));
+                if ui.button("Create Practice Repository").clicked() {
+                    let _ = app.run("repo.practice", json!({"path": path.trim()}));
+                }
+            });
+            ui.add_space(6.0);
+            let done = |ids: &[&str]| app.session.activity.iter().any(|a| a.ok && ids.contains(&a.command.as_str()));
+            for (title, how, ids) in LESSONS {
+                let ok = done(ids);
+                ui.horizontal_top(|ui| {
+                    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                    if ok {
+                        crate::icons::paint(ui.painter(), r, crate::icons::Icon::Check, t.added, t.added);
+                    } else {
+                        ui.painter().circle_stroke(r.center(), 6.0, egui::Stroke::new(1.5, t.dim));
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(*title).strong().color(if ok { t.dim } else { t.text }));
+                        ui.label(RichText::new(*how).small().color(t.dim));
+                    });
+                });
+                ui.add_space(3.0);
+            }
+            if buttons(ui, "Close", true, false) != (false, false) {
+                return Close::Cancel;
             }
         }
         Dialog::Workspaces { name } => {
@@ -1247,6 +1319,7 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
             ui.add_space(6.0);
             ui.label(RichText::new("TERMINAL").small().strong());
+            ui.checkbox(&mut app.prefs.builtin_terminal, format!("Open the terminal inside GitCraft ({})", util::shortcut_label("Mod+`")));
             ui.add(
                 egui::TextEdit::singleline(&mut app.prefs.terminal)
                     .hint_text("System default (e.g. kitty --directory {dir})")

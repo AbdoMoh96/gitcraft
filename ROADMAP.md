@@ -13,6 +13,15 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M3.** A terminal inside GitCraft (`ui.terminal`, Mod+`): the user's shell in a
+  pseudo-terminal (portable-pty) opened in the repository, shown in a resizable panel at the bottom
+  and drawn by a VT100 emulator (vt100), with colours, scrollback and the keys a shell needs; the
+  desktop's terminal is still in the repository menu and Preferences. Instant reloads: the open
+  repository's folder is watched (notify) and any change outside git's object store reloads it at
+  once; the periodic check stays as a fallback. Links: `gitcraft://open?path=…` (and `file://`
+  URLs) open a repository; the Linux installer registers the scheme. Learn Git (`ui.learn`, start
+  screen and repository menu): a practice repository (`repo.practice`) and nine lessons that tick
+  off as their commands succeed.
 - **2026-10-28 — M3.** Many repositories. Workspaces (`ui.workspaces`: save the open tabs under a
   name, open them all again from the repository menu). Profiles (`ui.profile`: each keeps its own
   tabs and favourites and can commit as its own author, set as git's author and committer for the

@@ -185,6 +185,12 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
                 let _ = app.ui_command("ui.revealRepo", &json!({}));
                 ui.close();
             }
+            if ui.button("Open External Terminal").clicked() {
+                if let Err(e) = app.ui_command("ui.terminal", &json!({"external": true})) {
+                    app.status(e, true);
+                }
+                ui.close();
+            }
             let here = app.session.repo.as_ref().map(|r| r.root().display().to_string()).unwrap_or_default();
             let fav = app.prefs.favorites.contains(&here);
             if ui.button(if fav { "Remove from Favourites" } else { "Add to Favourites" }).clicked() {
@@ -239,6 +245,10 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
         }
         if ui.button("Keyboard Shortcuts").clicked() {
             app.dialog = Some(Dialog::Shortcuts);
+            ui.close();
+        }
+        if ui.button("Learn Git…").clicked() {
+            app.dialog = Dialog::named("ui.learn", &app.session, &json!({}));
             ui.close();
         }
     });

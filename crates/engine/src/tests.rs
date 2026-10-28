@@ -279,7 +279,7 @@ fn hostile_params_never_panic() {
         json!({"name": "", "to": "", "from": "", "upstream": ""}),
     ];
     // These would touch folders outside the test repository (ssh.generate writes to ~/.ssh).
-    let skip = ["repo.open", "repo.init", "repo.clone", "ssh.generate"];
+    let skip = ["repo.open", "repo.init", "repo.clone", "repo.practice", "ssh.generate"];
     let (_d, mut s) = session("eng-hostile");
     let repo = s.repo().unwrap().clone();
     let ids: Vec<&'static str> = s.registry.all().iter().map(|c| c.id).collect();
@@ -725,4 +725,15 @@ fn scanning_finds_repositories() {
     let r = run(&mut s, "repo.scan", json!({"path": base.display().to_string(), "depth": 1}));
     assert!(!r["repositories"].as_array().unwrap().iter().any(|f| f.as_str().unwrap().ends_with("deep")));
     assert!(s.run("repo.scan", &json!({"path": "/no/such/folder"})).is_err());
+}
+
+#[test]
+fn practice_repository() {
+    let (d, mut s) = session("eng-practice");
+    let path = d.path().join("practice");
+    run(&mut s, "repo.practice", json!({"path": path.display().to_string()}));
+    assert_eq!(s.data.commits.len(), 3);
+    assert!(s.data.local_branches().any(|r| r.name == "try-something"));
+    assert_eq!(s.data.status.unstaged().count(), 1, "a change waiting to be committed");
+    assert!(s.run("repo.practice", &json!({"path": path.display().to_string()})).is_err(), "not empty");
 }

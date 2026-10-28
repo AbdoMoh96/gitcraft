@@ -22,6 +22,7 @@ gitcraft — a fast, open-source Git client
 
 USAGE:
   gitcraft [folder]              open the repository containing folder (default: the last one)
+  gitcraft gitcraft://open?path=<folder>   the same, from a link (file:// URLs work too)
   gitcraft --sample              open a throwaway sample repository (removed on exit)
   gitcraft --control <port>      accept automation on 127.0.0.1:<port> (see docs/control-protocol.md)
   gitcraft --help | --version
@@ -89,6 +90,45 @@ fn app_icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/gitcraft.png")).unwrap_or_default()
 }
 
+/// Decode `%XX` escapes (invalid ones are kept as they are).
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        if c == b'%'
+            && let (Some(h), Some(l)) = (b.get(i + 1).and_then(|x| (*x as char).to_digit(16)), b.get(i + 2).and_then(|x| (*x as char).to_digit(16)))
+        {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+            continue;
+        }
+        out.push(if c == b'+' { b' ' } else { c });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The folder a command-line argument names: a path, a `file://` URL, or a GitCraft link
+/// (`gitcraft://open?path=/home/me/repo` or `gitcraft://open/home/me/repo`).
+fn folder_arg(a: &str) -> Option<PathBuf> {
+    if let Some(rest) = a.strip_prefix("gitcraft://") {
+        let rest = rest.strip_prefix("open").unwrap_or(rest);
+        let path = if let Some(q) = rest.strip_prefix('?').or_else(|| rest.split_once('?').map(|(_, q)| q)) {
+            q.split('&').find_map(|kv| kv.strip_prefix("path=")).map(percent_decode)?
+        } else {
+            percent_decode(rest)
+        };
+        return (!path.is_empty()).then(|| PathBuf::from(path));
+    }
+    if let Some(rest) = a.strip_prefix("file://") {
+        // `file:///home/x` or `file://localhost/home/x`.
+        let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+        return Some(PathBuf::from(percent_decode(rest)));
+    }
+    Some(PathBuf::from(a))
+}
+
 fn main() -> std::process::ExitCode {
     logging::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -111,7 +151,7 @@ fn main() -> std::process::ExitCode {
         .iter()
         .enumerate()
         .find(|(i, a)| !a.starts_with("--") && (*i == 0 || args.get(i - 1).is_none_or(|p| p != "--control")))
-        .map(|(_, a)| PathBuf::from(a));
+        .and_then(|(_, a)| folder_arg(a));
 
     let mut prefs = load_prefs();
     let mut keep_sample = None;
@@ -189,5 +229,20 @@ fn main() -> std::process::ExitCode {
             eprintln!("gitcraft: {e}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn links_and_file_urls() {
+        assert_eq!(folder_arg("gitcraft://open?path=%2Fhome%2Fme%2Fmy%20repo"), Some(PathBuf::from("/home/me/my repo")));
+        assert_eq!(folder_arg("gitcraft://open/home/me/repo"), Some(PathBuf::from("/home/me/repo")));
+        assert_eq!(folder_arg("file:///tmp/a%20b"), Some(PathBuf::from("/tmp/a b")));
+        assert_eq!(folder_arg("/plain/path"), Some(PathBuf::from("/plain/path")));
+        assert_eq!(folder_arg("gitcraft://open?x=1"), None);
+        assert_eq!(percent_decode("%zz%4"), "%zz%4");
     }
 }

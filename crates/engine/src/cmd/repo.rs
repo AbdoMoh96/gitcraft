@@ -40,6 +40,48 @@ fn clone(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"message": format!("Cloned {url}"), "path": root, "open": root}))
 }
 
+/// A small repository to learn with: a README, two commits and a branch with an idea on it.
+fn practice(s: &mut Session, v: &Value) -> CmdResult {
+    let path = PathBuf::from(p::req_str(v, "path")?.trim());
+    if path.exists() && std::fs::read_dir(&path).map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return Err(crate::CmdError::Params(format!("{} exists and isn't empty: pick a new folder", path.display())));
+    }
+    let repo = s.git.init(&path, Some("main"))?;
+    // Commits need an author: a learner without one set gets a placeholder for this repository.
+    if repo.config("user.name").is_none() {
+        repo.set_config(gitcraft_git::ConfigScope::Local, "user.name", Some("Git Learner"))?;
+    }
+    if repo.config("user.email").is_none() {
+        repo.set_config(gitcraft_git::ConfigScope::Local, "user.email", Some("learner@example.com"))?;
+    }
+    let write = |name: &str, text: &str| -> Result<(), crate::CmdError> {
+        let f = repo.root().join(name);
+        if let Some(d) = f.parent() {
+            std::fs::create_dir_all(d).map_err(|e| crate::CmdError::Failed(e.to_string()))?;
+        }
+        std::fs::write(&f, text).map_err(|e| crate::CmdError::Failed(format!("{name}: {e}")))
+    };
+    let commit = |msg: &str| -> Result<String, crate::CmdError> {
+        repo.stage_all()?;
+        Ok(repo.commit(msg, false)?)
+    };
+    write("README.md", "# Practice repository\n\nA place to try GitCraft without worrying about breaking anything.\n")?;
+    commit("Start the practice repository")?;
+    write("notes/ideas.md", "# Ideas\n\n- Learn to stage part of a file\n")?;
+    commit("Write down some ideas")?;
+    repo.create_branch("try-something", None, true)?;
+    write("notes/ideas.md", "# Ideas\n\n- Learn to stage part of a file\n- Merge a branch\n")?;
+    commit("Add an idea on a branch")?;
+    repo.checkout_branch("main")?;
+    write(
+        "README.md",
+        "# Practice repository\n\nA place to try GitCraft without worrying about breaking anything.\n\nEdit me, then stage and commit the change.\n",
+    )?;
+    s.set_repo(repo)?;
+    let root = s.repo()?.root().display().to_string();
+    Ok(json!({"message": format!("Created a practice repository in {root}"), "path": root}))
+}
+
 fn close(s: &mut Session, _: &Value) -> CmdResult {
     s.close();
     super::done("Closed the repository")
@@ -108,6 +150,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(r#"{"url": string, "path"?: string (default: <into>/<name>), "into"?: string}"#)
             .pure()
             .slow(),
+        CommandSpec::new("repo.practice", "Practice Repository", "File", practice).params(r#"{"path": new folder}"#).pure(),
         CommandSpec::new("repo.scan", "Find Repositories", "File", scan_cmd).params(r#"{"path": folder, "depth"?: 1–6 (3)}"#).pure(),
         CommandSpec::new("repo.close", "Close Repository", "File", close).key("Mod+W").pure().when(need_repo),
         CommandSpec::new("repo.refresh", "Refresh", "View", refresh).key("F5").pure().when(need_repo),

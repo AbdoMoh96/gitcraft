@@ -17,6 +17,9 @@ log = { workspace = true }
 image = { workspace = true }
 sha2 = { workspace = true }
 ureq = { workspace = true }
+notify = { workspace = true }
+portable-pty = { workspace = true }
+vt100 = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }

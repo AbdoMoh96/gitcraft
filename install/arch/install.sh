@@ -53,14 +53,17 @@ Type=Application
 Name=GitCraft
 GenericName=Git Client
 Comment=Fast, open-source Git client
-Exec=$BIN_DIR/gitcraft %F
+Exec=$BIN_DIR/gitcraft %U
 Icon=gitcraft
+MimeType=x-scheme-handler/gitcraft;
 Terminal=false
 Categories=Development;RevisionControl;
 StartupWMClass=gitcraft
 DESKTOP
 
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$APP_DIR" || true
+# gitcraft://open?path=… links open GitCraft.
+command -v xdg-mime >/dev/null && xdg-mime default gitcraft.desktop x-scheme-handler/gitcraft || true
 command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
 
 case ":$PATH:" in
