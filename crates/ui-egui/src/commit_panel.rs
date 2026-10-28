@@ -676,6 +676,12 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
                 run = Some(("file.select", json!({"path": path, "area": "commit", "oid": s(&c["oid"])})));
             }
             resp.context_menu(|ui| {
+                if change != Change::Deleted && ui.button("View File at This Commit").clicked() {
+                    if let Err(e) = app.view_file(&path, &s(&c["oid"])) {
+                        app.status(e, true);
+                    }
+                    ui.close();
+                }
                 if ui.button("File History").clicked() {
                     run = Some(("view.history", json!({"path": path})));
                     ui.close();

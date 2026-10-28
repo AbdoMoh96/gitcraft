@@ -13,6 +13,8 @@ pub struct Editor {
     pub text: String,
     /// The text as loaded or last saved (unsaved changes when different).
     pub saved: String,
+    /// A file at a commit: shown, not edited (the revision).
+    pub rev: Option<String>,
 }
 
 /// Largest file opened in the editor.
@@ -29,7 +31,18 @@ impl GitApp {
             return Err("binary files can't be edited here".into());
         }
         let text = String::from_utf8(bytes).map_err(|_| "the file isn't UTF-8 text: open it in an editor".to_string())?;
-        self.editor = Some(Editor { path: path.to_string(), saved: text.clone(), text });
+        self.editor = Some(Editor { path: path.to_string(), saved: text.clone(), text, rev: None });
+        Ok(())
+    }
+
+    /// Show a file as it was at commit `rev` (read-only).
+    pub fn view_file(&mut self, path: &str, rev: &str) -> Result<(), String> {
+        let v = self.session.run("file.content", &serde_json::json!({"path": path, "rev": rev})).map_err(|e| e.to_string())?;
+        if v["binary"] == serde_json::json!(true) {
+            return Err("binary file".into());
+        }
+        let text = v["text"].as_str().unwrap_or("").to_string();
+        self.editor = Some(Editor { path: path.to_string(), saved: text.clone(), text, rev: Some(rev.to_string()) });
         Ok(())
     }
 }
@@ -43,7 +56,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     Frame::NONE.fill(t.chrome).inner_margin(Margin::symmetric(8, 5)).stroke(Stroke::new(1.0, t.border)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("Editing {}", ed.path)).strong());
+            match &ed.rev {
+                Some(r) => ui.label(RichText::new(format!("{} at {}", ed.path, r.get(..7).unwrap_or(r))).strong()),
+                None => ui.label(RichText::new(format!("Editing {}", ed.path)).strong()),
+            };
             if dirty {
                 ui.label(RichText::new("unsaved").small().color(t.warning));
             }
@@ -52,7 +68,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     close = true;
                 }
                 let b = egui::Button::new(RichText::new("Save").color(egui::Color32::WHITE).strong()).fill(crate::theme::APP_COLOR);
-                if ui.add_enabled(dirty, b).on_hover_text(util::shortcut_label("Mod+S")).clicked() {
+                if ed.rev.is_none() && ui.add_enabled(dirty, b).on_hover_text(util::shortcut_label("Mod+S")).clicked() {
                     save = true;
                 }
                 if dirty && ui.button("Revert").clicked() {
@@ -75,8 +91,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             job.wrap.max_width = wrap;
             ui.painter().layout_job(job)
         };
+        let readonly = ed.rev.is_some();
         ui.add(
             egui::TextEdit::multiline(&mut ed.text)
+                .interactive(!readonly)
                 .code_editor()
                 .desired_width(f32::INFINITY)
                 .desired_rows(40)
@@ -91,6 +109,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     }
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) && !dirty {
         close = true;
+    }
+    if ed.rev.is_some() {
+        save = false;
+        ed.text = ed.saved.clone();
     }
     if save && app.run("file.edit", json!({"path": ed.path, "content": ed.text})).is_ok() {
         ed.saved = ed.text.clone();

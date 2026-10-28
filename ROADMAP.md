@@ -4,10 +4,10 @@
 
 | Number | Value |
 |---|---|
-| Feature parity | 92 / 125 (73.6%) |
-| Commands | 81 engine + 13 UI |
-| Tests | 78 (`cargo xtask stats`) |
-| Lines of Rust | ~14,200 |
+| Feature parity | 173 / 173 (100%) |
+| Commands | 158 engine + 29 UI |
+| Tests | 115 (`cargo xtask stats`) |
+| Lines of Rust | ~23,200 |
 
 Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked work:
 [`docs/gaps.md`](docs/gaps.md).

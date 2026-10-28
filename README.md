@@ -34,18 +34,17 @@
 
 | Area | Features |
 |---|---|
-| **Repositories** | Open (folder, recent list, drag and drop), clone, init, close, reopen the last one, reload on outside changes |
-| **Graph** | Lanes with curved merges, branch / remote / tag labels with the lane colour, author avatars, relative dates, WIP row, search with dimming, keyboard navigation, load more, file history mode |
-| **Left panel** | Local branches with ahead/behind, remotes and their branches, stashes, tags, filter, context menus |
-| **Commit panel** | Unstaged and staged files, stage / unstage / discard per file or all, conflict banner with Continue / Skip / Abort, summary with 72-character countdown, description, amend, commit |
-| **Diff view** | Hunk, inline and split modes; stage, unstage or discard a hunk or picked lines; blame; file history |
-| **Branches** | Create (anywhere), checkout (local or remote with tracking), rename, delete, set upstream, delete on remote, merge, fast-forward, rebase |
-| **Commits** | Checkout (detached), cherry-pick, revert, reset soft / mixed / hard, tag (lightweight or annotated), copy SHA and message |
-| **Remotes** | Fetch (all or one, prune), pull (merge, fast-forward only, rebase), push (sets upstream), force push with lease, add / remove remotes, push tags. Network commands run in the background |
-| **Undo / redo** | Commit, amend, checkout, branch create / delete / rename, tag create / delete, reset |
-| **Everywhere** | Command palette (Ctrl+P / ⌘P), keyboard shortcuts, light / dark / system theme, preferences |
+| **Repositories** | Open (folder, recent list, favourites, drag and drop, `gitcraft://` links), clone (also from your GitHub / GitLab account), init, find repositories in a folder, tabs, workspaces, profiles, instant reload on file changes |
+| **Graph** | Lanes with curved merges, labels, avatars, WIP row, search, solo / hide branches, show or hide remotes and tags, columns, an overview strip, compare commits, keyboard navigation, file history |
+| **Left panel** | Local branches (pinned, multi-select), remotes (edit URL, prune, drop a branch to push), stashes (rename, view), tags, submodules, worktrees, pull requests, issues, CI |
+| **Commit panel** | Stage / unstage / discard per file, folder or all, tree view, ignore, stash a file, conflicts, message with template, co-authors, sign, skip hooks, AI message (your own command) |
+| **Diff view** | Hunk, inline and split; stage, unstage or discard hunks or lines; word and syntax highlighting; ignore whitespace; image diffs; blame; edit the file in GitCraft or an external editor |
+| **History editing** | Interactive rebase (reorder, reword, squash, fixup, drop), squash into parent, move commits, edit any message, cherry-pick several commits — all undoable |
+| **Repository tools** | Patches (create, apply, share as a secret gist), Git LFS, Git Flow, hooks, external diff and merge tools, insights, team overlap, author identity, signing, SSH keys |
+| **Remotes** | Fetch (all, one, automatically), pull (merge, fast-forward, rebase), push, force push with lease, pull requests through `gh` / `glab` |
+| **Everywhere** | Built-in terminal, command palette (Ctrl+P / ⌘P), keyboard shortcuts, zoom, light / dark / system theme, Learn Git lessons with a practice repository, activity list |
 
-Parity is measured against the incumbent's feature list: **86 of 123 features** today
+Parity is measured against the incumbent's feature list: **173 of 173 features** today
 ([`docs/parity-checklist.md`](docs/parity-checklist.md)).
 
 ## Quick start
@@ -68,7 +67,7 @@ and icon; `install/arch/uninstall.sh [--purge]` removes them.
 gitcraft-cli status --repo .                      # branch, files, branches, tags, stashes (JSON)
 gitcraft-cli log --repo . --limit 30              # the commit graph as text
 gitcraft-cli run --repo . --cmd 'branch.create={"name":"topic"}' --cmd stage.all --cmd 'commit.create={"summary":"Work"}'
-gitcraft-cli commands                             # all 79 commands with labels, locations and shortcuts
+gitcraft-cli commands                             # all 158 commands with labels, locations and shortcuts
 gitcraft-cli parity                               # feature parity
 gitcraft-cli mcp --repo .                         # MCP server on stdio (headless)
 gitcraft-cli mcp --connect 127.0.0.1:7990         # MCP bridged to a running app: gitcraft --control 7990
