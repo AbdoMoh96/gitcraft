@@ -109,6 +109,8 @@ fn every_view_lays_out() {
         "config.signing",
         "ssh.keys",
         "commit.coAuthors",
+        "submodule.add",
+        "worktree.add",
         "shortcuts",
         "preferences",
     ] {

@@ -211,7 +211,116 @@ fn sections(app: &mut GitApp, ui: &mut egui::Ui) {
             });
         }
     }
+    submodules_and_worktrees(app, ui);
     let _ = RichText::new("");
+}
+
+fn submodules_and_worktrees(app: &mut GitApp, ui: &mut egui::Ui) {
+    let subs: Vec<gitcraft_engine::git::Submodule> = app.session.data.submodules.iter().filter(|s| matches(app, &s.path)).cloned().collect();
+    let root = app.session.repo.as_ref().map(|r| r.root().to_path_buf()).unwrap_or_default();
+    if header(ui, "submodules", Icon::Folder, "SUBMODULES", subs.len(), |ui| {
+        if ui.button("Add Submodule…").clicked() {
+            app.dialog = Some(Dialog::AddSubmodule { url: String::new(), path: String::new() });
+            ui.close();
+        }
+        if ui.add_enabled(app.disabled("submodule.update").is_none(), egui::Button::new("Update All")).clicked() {
+            let _ = app.run("submodule.update", json!({}));
+            ui.close();
+        }
+    }) {
+        use gitcraft_engine::git::SubmoduleState as St;
+        for sm in &subs {
+            let badge = match sm.state {
+                St::Clean => None,
+                St::Uninitialized => Some("not cloned".to_string()),
+                St::Modified => Some("changed".to_string()),
+                St::Conflict => Some("conflict".to_string()),
+            };
+            let resp = row(ui, 22.0, Icon::Folder, &sm.path, false, badge, None);
+            let resp = resp.on_hover_text(sm.url.clone().unwrap_or_default());
+            if resp.double_clicked() && sm.state != St::Uninitialized {
+                let _ = app.open_repo(&root.join(&sm.path));
+            }
+            resp.context_menu(|ui| {
+                if ui.add_enabled(sm.state != St::Uninitialized, egui::Button::new("Open in a Tab")).clicked() {
+                    let _ = app.open_repo(&root.join(&sm.path));
+                    ui.close();
+                }
+                let label = if sm.state == St::Uninitialized { "Clone (Initialize)" } else { "Update" };
+                if ui.button(label).clicked() {
+                    let _ = app.run("submodule.update", json!({"path": sm.path}));
+                    ui.close();
+                }
+                if ui.button("Copy URL").clicked() {
+                    app.copy(sm.url.clone().unwrap_or_default());
+                    ui.close();
+                }
+                if ui.button("Sync URLs").clicked() {
+                    let _ = app.run("submodule.sync", json!({}));
+                    ui.close();
+                }
+                if ui.button("Remove Submodule…").clicked() {
+                    app.dialog = Some(Dialog::confirm(
+                        &format!("Remove the submodule {}?", sm.path),
+                        "Its folder is deleted and its entry removed from .gitmodules; commit to finish.",
+                        "submodule.remove",
+                        json!({"path": sm.path}),
+                        "Remove",
+                    ));
+                    ui.close();
+                }
+            });
+        }
+    }
+    let wts: Vec<gitcraft_engine::git::Worktree> = app.session.data.worktrees.iter().filter(|w| matches(app, &w.path)).cloned().collect();
+    if header(ui, "worktrees", Icon::Laptop, "WORKTREES", wts.len(), |ui| {
+        if ui.add_enabled(app.disabled("worktree.add").is_none(), egui::Button::new("Add Worktree…")).clicked() {
+            app.dialog = Some(Dialog::AddWorktree { path: String::new(), branch: String::new(), new_branch: true });
+            ui.close();
+        }
+        if ui.button("Prune Missing").clicked() {
+            let _ = app.run("worktree.prune", json!({}));
+            ui.close();
+        }
+    }) {
+        for w in &wts {
+            let here = root.as_path() == std::path::Path::new(&w.path);
+            let name = w.branch.clone().unwrap_or_else(|| format!("detached {}", w.head.as_deref().and_then(|h| h.get(..7)).unwrap_or("")));
+            let badge = if w.main {
+                Some("main".to_string())
+            } else if w.prunable {
+                Some("missing".to_string())
+            } else if w.locked {
+                Some("locked".to_string())
+            } else {
+                None
+            };
+            let resp = row(ui, 22.0, Icon::Laptop, &name, here, badge, None).on_hover_text(&w.path);
+            if resp.double_clicked() && !here {
+                let _ = app.open_repo(std::path::Path::new(&w.path));
+            }
+            resp.context_menu(|ui| {
+                if ui.add_enabled(!here && !w.prunable, egui::Button::new("Open in a Tab")).clicked() {
+                    let _ = app.open_repo(std::path::Path::new(&w.path));
+                    ui.close();
+                }
+                if ui.button("Copy Path").clicked() {
+                    app.copy(w.path.clone());
+                    ui.close();
+                }
+                if !w.main && !here && ui.button("Remove Worktree…").clicked() {
+                    app.dialog = Some(Dialog::confirm(
+                        &format!("Remove the work tree at {}?", w.path),
+                        "Its folder is deleted (refused when it has uncommitted changes). The branch stays.",
+                        "worktree.remove",
+                        json!({"path": w.path}),
+                        "Remove",
+                    ));
+                    ui.close();
+                }
+            });
+        }
+    }
 }
 
 /// The menu of a branch (local or remote), also used by the graph's labels.

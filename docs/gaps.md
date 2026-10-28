@@ -19,7 +19,8 @@ Highest value first. Each item names the catalog ids it fills (`docs/parity-chec
 6. ~~Identity and signing~~ — landed: `config.identity` (this repository or every one), `config.signing`
    (OpenPGP, SSH or X.509 keys), `commit.sign`, `commit.noVerify`, `commit.template`, `commit.coAuthors`,
    `ssh.keys` / `ssh.generate`.
-7. **Submodules and worktrees** — `submodule.list`, `worktree.list`.
+7. ~~Submodules and worktrees~~ — landed: `submodule.list/update/add/sync/remove`,
+   `worktree.list/add/remove/prune`; left panel sections; open either in a tab.
 8. **Tools** — `file.ignore`, `patch.create`, `patch.apply`, `lfs.track`, `gitflow.init`, `hooks.list`,
    `ui.terminal`, `file.edit`.
 9. **Hosting integrations** — `pr.list`, `pr.create`, `issues.list`, `ci.list`, `integrations.connect`

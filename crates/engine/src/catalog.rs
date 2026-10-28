@@ -82,6 +82,10 @@ Left Panel|Sections|Pull Requests|pr.list
 Left Panel|Sections|Issues|issues.list
 Left Panel|Sections|Submodules|submodule.list
 Left Panel|Sections|Worktrees|worktree.list
+Left Panel|Sections|Add Submodule|submodule.add
+Left Panel|Sections|Update Submodules|submodule.update
+Left Panel|Sections|Add Worktree|worktree.add
+Left Panel|Sections|Remove Worktree|worktree.remove
 Left Panel|Sections|CI Status|ci.list
 Commit Panel|Staging|Stage File|stage.file
 Commit Panel|Staging|Unstage File|unstage.file
@@ -237,7 +241,7 @@ mod tests {
     use super::*;
 
     /// Parity only rises: raise this floor when features land.
-    const FLOOR: usize = 117;
+    const FLOOR: usize = 123;
 
     #[test]
     fn parity_floor() {

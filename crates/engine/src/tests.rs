@@ -591,3 +591,21 @@ fn identity_signing_template_and_commit_options() {
     assert!(run(&mut s, "ssh.keys", json!({}))["keys"].is_array());
     assert!(s.run("ssh.generate", &json!({"name": "../x"})).is_err());
 }
+
+#[test]
+fn worktrees_from_commands() {
+    let (d, mut s) = session("eng-worktree");
+    assert!(s.data.worktrees.is_empty());
+    let path = d.path().join("second").to_string_lossy().into_owned();
+    run(&mut s, "worktree.add", json!({"path": path, "branch": "wt-branch", "newBranch": true}));
+    assert_eq!(s.data.worktrees.len(), 2);
+    assert!(s.data.local_branches().any(|r| r.name == "wt-branch"));
+    let r = run(&mut s, "worktree.list", json!({}));
+    assert_eq!(r["worktrees"].as_array().unwrap().len(), 2);
+    let root = s.repo().unwrap().root().to_string_lossy().into_owned();
+    assert!(s.run("worktree.remove", &json!({"path": root})).is_err());
+    run(&mut s, "worktree.remove", json!({"path": path}));
+    assert!(s.data.worktrees.is_empty());
+    assert!(s.run("submodule.update", &json!({})).is_err(), "no submodules");
+    assert_eq!(run(&mut s, "submodule.list", json!({}))["submodules"], json!([]));
+}

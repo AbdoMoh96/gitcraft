@@ -13,6 +13,12 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M5.** Submodules and worktrees in the left panel. Submodules (`submodule.list`) show
+  whether each is cloned, changed or in conflict; Update / Clone (`submodule.update`, in the
+  background), Add Submodule (`submodule.add`), Sync URLs, Remove (`submodule.remove`), and a
+  double-click opens one in a tab. Worktrees (`worktree.list`): Add Worktree (`worktree.add`: a
+  branch, new or existing, in a folder beside the repository), Remove (`worktree.remove`), Prune
+  Missing, and a double-click opens one in a tab.
 - **2026-10-28 — M3.** Who commits and how: Author Identity (`config.identity`, for this repository or
   every repository), Commit Signing (`config.signing`: GPG, SSH or X.509 key, sign commits and tags by
   default), SSH Keys (`ssh.keys`: copy a public key; `ssh.generate`: a new ed25519 key with

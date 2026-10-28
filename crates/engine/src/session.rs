@@ -227,6 +227,9 @@ pub struct RepoData {
     pub more: bool,
     /// Settings the views read (`user.name`, `commit.gpgsign`, …), loaded with the rest.
     pub config: HashMap<String, String>,
+    pub submodules: Vec<gitcraft_git::Submodule>,
+    /// Linked work trees (the main one first); empty when there is only the main one.
+    pub worktrees: Vec<gitcraft_git::Worktree>,
 }
 
 impl RepoData {
@@ -414,7 +417,10 @@ impl Session {
         let stashes = repo.stashes().unwrap_or_default();
         let remotes = repo.remotes().unwrap_or_default();
         let config = repo.config_matching(CONFIG_KEYS);
-        self.data = RepoData { status, refs, commits, graph, stashes, remotes, row_of, labels, more, config };
+        let submodules = repo.submodules().unwrap_or_default();
+        let worktrees = repo.worktrees().unwrap_or_default();
+        let worktrees = if worktrees.len() > 1 { worktrees } else { Vec::new() };
+        self.data = RepoData { status, refs, commits, graph, stashes, remotes, row_of, labels, more, config, submodules, worktrees };
         self.fix_selection();
         Ok(())
     }
@@ -598,6 +604,8 @@ impl Session {
             "tags": self.data.tags().map(|r| r.name.clone()).collect::<Vec<_>>(),
             "stashes": self.data.stashes.iter().map(|s| json!({"index": s.index, "message": s.message})).collect::<Vec<_>>(),
             "remotes": self.data.remotes.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+            "submodules": self.data.submodules,
+            "worktrees": self.data.worktrees,
             "commitsLoaded": self.data.commits.len(),
             "moreCommits": self.data.more,
             "selection": self.sel,

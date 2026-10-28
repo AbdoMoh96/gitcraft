@@ -8,6 +8,7 @@ pub mod edit;
 pub mod history;
 pub mod inspect;
 pub mod merge;
+pub mod modules;
 pub mod remote;
 pub mod repo;
 pub mod stage;
@@ -37,6 +38,7 @@ pub fn registry() -> Registry {
     v.extend(conflict::specs());
     v.extend(inspect::specs());
     v.extend(config::specs());
+    v.extend(modules::specs());
     Registry::new(v)
 }
 

@@ -67,6 +67,15 @@ pub enum Dialog {
         oid: String,
         rows: Vec<RebaseRow>,
     },
+    AddSubmodule {
+        url: String,
+        path: String,
+    },
+    AddWorktree {
+        path: String,
+        branch: String,
+        new_branch: bool,
+    },
     /// The author identity for this repository and for every repository.
     Identity {
         local_name: String,
@@ -150,6 +159,10 @@ impl Dialog {
                     .collect();
                 Dialog::Rebase { oid, rows }
             }
+            "submodule.add" => Dialog::AddSubmodule { url: st("url").unwrap_or_default(), path: st("path").unwrap_or_default() },
+            "worktree.add" => {
+                Dialog::AddWorktree { path: st("path").unwrap_or_default(), branch: st("branch").unwrap_or_default(), new_branch: true }
+            }
             "config.identity" => {
                 let r = s.repo.as_ref()?;
                 let get = |sc, k| r.config_in(sc, k).unwrap_or_default();
@@ -213,6 +226,8 @@ impl Dialog {
             Dialog::Confirm { .. } => "confirm",
             Dialog::Diverged { .. } => "diverged",
             Dialog::Rebase { .. } => "rebase.interactive",
+            Dialog::AddSubmodule { .. } => "submodule.add",
+            Dialog::AddWorktree { .. } => "worktree.add",
             Dialog::Identity { .. } => "config.identity",
             Dialog::Signing { .. } => "config.signing",
             Dialog::SshKeys { .. } => "ssh.keys",
@@ -524,6 +539,53 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
             }
         }
         Dialog::Rebase { oid, rows } => return rebase_body(ui, oid, rows, t),
+        Dialog::AddSubmodule { url, path } => {
+            ui.heading("Add Submodule");
+            ui.add_space(6.0);
+            field(ui, "URL", url, "https://host/owner/library.git", first);
+            if path.is_empty() {
+                let guess = url.trim().trim_end_matches('/').rsplit(['/', ':']).next().unwrap_or("").trim_end_matches(".git").to_string();
+                ui.label(RichText::new(format!("Folder: {guess}")).small().weak());
+            }
+            field(ui, "FOLDER IN THE REPOSITORY", path, "vendor/library", false);
+            let target = if path.trim().is_empty() {
+                url.trim().trim_end_matches('/').rsplit(['/', ':']).next().unwrap_or("").trim_end_matches(".git").to_string()
+            } else {
+                path.trim().to_string()
+            };
+            let (ok, cancel) = buttons(ui, "Add Submodule", !url.trim().is_empty() && !target.is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("submodule.add".into(), json!({"url": url.trim(), "path": target}));
+            }
+        }
+        Dialog::AddWorktree { path, branch, new_branch } => {
+            ui.heading("Add Worktree");
+            ui.label(RichText::new("Another folder with its own checkout of this repository.").small().color(t.dim));
+            ui.add_space(6.0);
+            field(ui, "BRANCH", branch, "feature/next", first);
+            ui.checkbox(new_branch, "Create the branch (from HEAD)");
+            if path.trim().is_empty() && !branch.trim().is_empty() {
+                let repo = app.session.repo.as_ref().map(|r| r.name()).unwrap_or_default();
+                ui.label(RichText::new(format!("Folder: {repo}-{}", branch.trim().replace('/', "-"))).small().weak());
+            }
+            field(ui, "FOLDER (relative: beside the repository)", path, "", false);
+            let folder = if path.trim().is_empty() {
+                let repo = app.session.repo.as_ref().map(|r| r.name()).unwrap_or_default();
+                format!("{repo}-{}", branch.trim().replace('/', "-"))
+            } else {
+                path.trim().to_string()
+            };
+            let (ok, cancel) = buttons(ui, "Add Worktree", !branch.trim().is_empty(), false);
+            if cancel {
+                return Close::Cancel;
+            }
+            if ok {
+                return Close::Run("worktree.add".into(), json!({"path": folder, "branch": branch.trim(), "newBranch": *new_branch}));
+            }
+        }
         Dialog::Identity { local_name, local_email, global_name, global_email } => {
             ui.heading("Author Identity");
             ui.label(RichText::new("The name and e-mail address your commits are made with.").small().color(t.dim));
