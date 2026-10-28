@@ -104,6 +104,7 @@ fn every_view_lays_out() {
         "tag.create",
         "remote.add",
         "stash.save",
+        "rebase.interactive",
         "shortcuts",
         "preferences",
     ] {

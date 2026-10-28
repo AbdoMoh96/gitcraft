@@ -64,6 +64,13 @@ pub enum UndoStep {
         before: String,
         after: String,
     },
+    /// History rewritten (interactive rebase, squash, drop): HEAD moved from `before` to
+    /// `after` and the work tree followed it.
+    Rewrite {
+        label: String,
+        before: String,
+        after: String,
+    },
     /// Several steps taken as one (create a branch and check it out).
     Many(String, Vec<UndoStep>),
 }
@@ -120,7 +127,7 @@ impl UndoStep {
             UndoStep::Reset { .. } => "Reset".into(),
             UndoStep::Reword { .. } => "Edit commit message".into(),
             UndoStep::RefMove { name, .. } => format!("Fast-forward {name}"),
-            UndoStep::Many(label, _) => label.clone(),
+            UndoStep::Rewrite { label, .. } | UndoStep::Many(label, _) => label.clone(),
         }
     }
 
@@ -161,6 +168,10 @@ impl UndoStep {
                 repo.run_ok(&["update-ref", "-m", "gitcraft: undo edit commit message", "HEAD", before.as_str(), after.as_str()])?;
             }
             UndoStep::RefMove { name, before, after } => move_ref(repo, name, after, before)?,
+            UndoStep::Rewrite { before, after, .. } => {
+                head_is(repo, after)?;
+                repo.run_ok(&["reset", "-q", "--keep", before.as_str()])?;
+            }
             UndoStep::Many(_, steps) => {
                 for st in steps.iter().rev() {
                     st.undo(repo)?;
@@ -205,6 +216,10 @@ impl UndoStep {
                 repo.run_ok(&["update-ref", "-m", "gitcraft: redo edit commit message", "HEAD", after.as_str(), before.as_str()])?;
             }
             UndoStep::RefMove { name, before, after } => move_ref(repo, name, before, after)?,
+            UndoStep::Rewrite { before, after, .. } => {
+                head_is(repo, before)?;
+                repo.run_ok(&["reset", "-q", "--keep", after.as_str()])?;
+            }
             UndoStep::Many(_, steps) => {
                 for st in steps {
                     st.redo(repo)?;

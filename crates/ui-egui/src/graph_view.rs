@@ -739,6 +739,38 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
         actions.push(Action::Reword(Reword { oid: c.oid.clone(), summary: c.summary.clone(), description: c.body.trim().to_string(), focus: true }));
         ui.close();
     }
+    ui.menu_button("Edit History", |ui| {
+        if item(ui, "rebase.interactive", "Interactive Rebase from Here…") {
+            match Dialog::named("rebase.interactive", &app.session, &json!({"oid": c.oid})) {
+                Some(d) => actions.push(Action::Dialog(d)),
+                // Not rebasable (a merge in the way): the plan's error says why.
+                None => actions.push(Action::Run("rebase.plan", json!({"oid": c.oid}))),
+            }
+            ui.close();
+        }
+        if !c.parents.is_empty() && item(ui, "commit.squash", "Squash into Parent") {
+            actions.push(Action::Run("commit.squash", json!({"oid": c.oid})));
+            ui.close();
+        }
+        if item(ui, "commit.moveUp", "Move Up") {
+            actions.push(Action::Run("commit.moveUp", json!({"oid": c.oid})));
+            ui.close();
+        }
+        if !c.parents.is_empty() && item(ui, "commit.moveDown", "Move Down") {
+            actions.push(Action::Run("commit.moveDown", json!({"oid": c.oid})));
+            ui.close();
+        }
+        if item(ui, "commit.drop", "Drop Commit…") {
+            actions.push(Action::Dialog(Dialog::confirm(
+                &format!("Drop {short}?"),
+                "The commit is removed from the branch and the commits after it are re-created. Undo brings it back.",
+                "commit.drop",
+                json!({"oid": c.oid}),
+                "Drop",
+            )));
+            ui.close();
+        }
+    });
     ui.separator();
     if item(ui, "cherryPick.commit", "Cherry Pick Commit") {
         actions.push(Action::Run("cherryPick.commit", json!({"oid": c.oid})));

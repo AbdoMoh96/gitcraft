@@ -4,6 +4,7 @@ pub mod branch;
 pub mod commit;
 pub mod conflict;
 pub mod edit;
+pub mod history;
 pub mod inspect;
 pub mod merge;
 pub mod remote;
@@ -28,6 +29,7 @@ pub fn registry() -> Registry {
     v.extend(commit::specs());
     v.extend(branch::specs());
     v.extend(merge::specs());
+    v.extend(history::specs());
     v.extend(tag::specs());
     v.extend(remote::specs());
     v.extend(stash::specs());

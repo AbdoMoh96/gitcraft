@@ -13,6 +13,13 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-10-28 — M2.** Interactive rebase (`rebase.interactive`): Graph › Edit History › Interactive
+  Rebase from Here opens the commits up to HEAD, newest first; each can be picked, reworded (with a new
+  message), squashed, fixed up or dropped, and moved up or down. GitCraft writes the todo list and git
+  takes it through `GIT_SEQUENCE_EDITOR`; new messages are applied with `exec` amend lines, so git
+  never opens an editor. Uncommitted changes are stashed around it (`--autostash`). Shortcuts:
+  Squash into Parent (`commit.squash`), Drop Commit (`commit.drop`), Move Up / Down
+  (`commit.moveUp` / `commit.moveDown`). All undoable (`reset --keep` back to the old tip).
 - **2026-10-28 — M3.** Tab reordering: drag a tab along the strip and the others slide aside as it
   passes their middle (eased, frame-rate independent); release settles it into its slot.
   Ctrl+Shift+PageUp / PageDown move the shown tab; `ui.tabs` `move` (`index`, `to` or `by`) for

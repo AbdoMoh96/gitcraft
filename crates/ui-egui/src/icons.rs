@@ -35,6 +35,7 @@ pub enum Icon {
     Blame,
     Chevron,
     ChevronDown,
+    ChevronUp,
     Pencil,
     Terminal,
 }
@@ -240,6 +241,7 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32, a: Color32) {
         }
         Icon::Chevron => pen.line(&[(7.5, 4.5), (13.0, 10.0), (7.5, 15.5)]),
         Icon::ChevronDown => pen.line(&[(4.5, 7.5), (10.0, 13.0), (15.5, 7.5)]),
+        Icon::ChevronUp => pen.line(&[(4.5, 12.5), (10.0, 7.0), (15.5, 12.5)]),
     }
 }
 

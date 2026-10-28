@@ -416,3 +416,57 @@ fn pull_remote_branch_fetches_tracks_and_integrates() {
         assert!(s.run("branch.pullRemote", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn history_editing_squash_drop_move_and_undo() {
+    let (_d, mut s) = session("eng-history");
+    let repo = s.repo().unwrap().clone();
+    for name in ["a", "b", "c"] {
+        write(&repo, &format!("{name}.txt"), "x\n").unwrap();
+        run(&mut s, "commit.stageAllAndCommit", json!({"summary": name}));
+    }
+    let summaries = |s: &Session| {
+        s.repo()
+            .unwrap()
+            .log(&gitcraft_git::LogQuery { revs: vec!["HEAD".into()], ..Default::default() })
+            .unwrap()
+            .into_iter()
+            .map(|c| c.summary)
+            .collect::<Vec<_>>()
+    };
+    let head = s.data.status.head.clone().unwrap();
+    let b = repo.resolve("HEAD~1").unwrap();
+    let plan = run(&mut s, "rebase.plan", json!({"oid": b}));
+    assert_eq!(plan["commits"].as_array().unwrap().len(), 2);
+    // Squash c into b, then undo.
+    run(&mut s, "commit.squash", json!({"oid": head, "message": "b and c"}));
+    assert_eq!(summaries(&s)[..2], ["b and c", "a"]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.data.status.head.as_deref(), Some(head.as_str()));
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    // Drop b.
+    run(&mut s, "commit.drop", json!({"oid": b}));
+    assert_eq!(summaries(&s)[..2], ["c", "a"]);
+    assert!(!repo.root().join("b.txt").exists());
+    run(&mut s, "edit.undo", json!({}));
+    // Move c down below b.
+    run(&mut s, "commit.moveDown", json!({"oid": head}));
+    assert_eq!(summaries(&s)[..3], ["b", "c", "a"]);
+    run(&mut s, "edit.undo", json!({}));
+    // A full todo list: reword a, fixup b into it, keep c.
+    let a = repo.resolve("HEAD~2").unwrap();
+    run(
+        &mut s,
+        "rebase.interactive",
+        json!({"oid": a, "items": [
+            {"action": "reword", "oid": a, "message": "A!"},
+            {"action": "fixup", "oid": b},
+            {"action": "pick", "oid": head},
+        ]}),
+    );
+    assert_eq!(summaries(&s)[..2], ["c", "A!"]);
+    assert!(repo.root().join("b.txt").exists());
+    assert!(s.run("rebase.interactive", &json!({"oid": a, "items": "x"})).is_err());
+    assert!(s.run("commit.squash", &json!({"oid": repo.resolve("HEAD~3").unwrap()})).is_err(), "the root commit");
+}

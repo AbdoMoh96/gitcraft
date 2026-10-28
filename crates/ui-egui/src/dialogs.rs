@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use egui::{Id, RichText};
+use gitcraft_engine::git::TodoAction;
 use gitcraft_engine::{Selected, Session};
 use serde_json::{Value, json};
 
@@ -61,8 +62,23 @@ pub enum Dialog {
         /// Local commits whose change isn't on the remote already (merges aside).
         unique: u64,
     },
+    /// The todo list of an interactive rebase, oldest commit first.
+    Rebase {
+        oid: String,
+        rows: Vec<RebaseRow>,
+    },
     Shortcuts,
     Preferences,
+}
+
+/// One commit in the interactive rebase dialog.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RebaseRow {
+    pub action: TodoAction,
+    pub oid: String,
+    pub summary: String,
+    /// The new message (reword, or a squash group's).
+    pub message: String,
 }
 
 fn home() -> String {
@@ -97,6 +113,15 @@ impl Dialog {
                 behind: v.get("behind").and_then(Value::as_u64).unwrap_or(0),
                 unique: v.get("unique").and_then(Value::as_u64).unwrap_or(1),
             },
+            "rebase.interactive" => {
+                let oid = st("oid").or(selected)?;
+                let (_, commits) = s.repo.as_ref()?.rebase_plan(&oid).ok()?;
+                let rows = commits
+                    .into_iter()
+                    .map(|c| RebaseRow { action: TodoAction::Pick, message: c.message(), summary: c.summary, oid: c.oid })
+                    .collect();
+                Dialog::Rebase { oid, rows }
+            }
             "shortcuts" | "ui.shortcuts" => Dialog::Shortcuts,
             "preferences" | "ui.preferences" => Dialog::Preferences,
             _ => return None,
@@ -119,6 +144,7 @@ impl Dialog {
             Dialog::Stash { .. } => "stash.save",
             Dialog::Confirm { .. } => "confirm",
             Dialog::Diverged { .. } => "diverged",
+            Dialog::Rebase { .. } => "rebase.interactive",
             Dialog::Shortcuts => "shortcuts",
             Dialog::Preferences => "preferences",
         }
@@ -425,6 +451,7 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 return Close::Cancel;
             }
         }
+        Dialog::Rebase { oid, rows } => return rebase_body(ui, oid, rows, t),
         Dialog::Shortcuts => {
             ui.heading("Keyboard Shortcuts");
             ui.add_space(6.0);
@@ -496,6 +523,67 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 return Close::Cancel;
             }
         }
+    }
+    Close::Keep
+}
+
+/// The interactive rebase list: newest at the top like the graph; each row's action, up / down,
+/// and the new message for rewords.
+fn rebase_body(ui: &mut egui::Ui, oid: &str, rows: &mut [RebaseRow], t: Tokens) -> Close {
+    ui.set_width(560.0);
+    ui.heading("Interactive Rebase");
+    ui.label(RichText::new("Newest first. Squash and Fixup combine a commit with the one below it; Drop leaves it out.").small().color(t.dim));
+    ui.add_space(6.0);
+    let mut swap: Option<(usize, usize)> = None;
+    let n = rows.len();
+    egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+        for i in (0..n).rev() {
+            let Some(r) = rows.get_mut(i) else { continue };
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt(("rebase_action", i)).width(80.0).selected_text(r.action.label()).show_ui(ui, |ui| {
+                    for a in TodoAction::ALL {
+                        ui.selectable_value(&mut r.action, a, a.label());
+                    }
+                });
+                let top = (i + 1 >= n).then_some("already the newest");
+                if crate::icons::button(ui, crate::icons::Icon::ChevronUp, "Move up (newer)", top, 12.0).clicked() {
+                    swap = Some((i, i + 1));
+                }
+                let bottom = (i == 0).then_some("already the oldest");
+                if crate::icons::button(ui, crate::icons::Icon::ChevronDown, "Move down (older)", bottom, 12.0).clicked() {
+                    swap = Some((i, i.saturating_sub(1)));
+                }
+                ui.label(RichText::new(r.oid.get(..7).unwrap_or(&r.oid)).monospace().color(t.dim));
+                let text = RichText::new(&r.summary);
+                ui.label(if r.action == TodoAction::Drop { text.strikethrough().color(t.dim) } else { text });
+            });
+            if r.action == TodoAction::Reword {
+                ui.add(egui::TextEdit::multiline(&mut r.message).desired_rows(2).desired_width(f32::INFINITY));
+            }
+        }
+    });
+    if let Some((a, b)) = swap {
+        rows.swap(a, b);
+    }
+    let first_kept = rows.iter().find(|r| r.action != TodoAction::Drop).map(|r| r.action);
+    let valid = !matches!(first_kept, Some(TodoAction::Squash | TodoAction::Fixup))
+        && rows.iter().all(|r| r.action != TodoAction::Reword || !r.message.trim().is_empty());
+    if !valid {
+        ui.label(RichText::new("The oldest commit kept can't be squashed, and rewords need a message.").small().color(t.warning));
+    }
+    let (ok, cancel) = buttons(ui, "Start Rebase", valid, false);
+    if cancel {
+        return Close::Cancel;
+    }
+    if ok {
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                let message = (r.action == TodoAction::Reword).then(|| r.message.clone());
+                json!({"action": r.action.code(), "oid": r.oid, "message": message})
+            })
+            .collect();
+        return Close::Run("rebase.interactive".into(), json!({"oid": oid, "items": items}));
     }
     Close::Keep
 }

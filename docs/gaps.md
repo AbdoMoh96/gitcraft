@@ -4,9 +4,9 @@ Status: M1 · Revision 1 (2026-10-17)
 
 Highest value first. Each item names the catalog ids it fills (`docs/parity-checklist.md`).
 
-1. **Interactive rebase** — `rebase.interactive`, `commit.squash`, `commit.drop` (`commit.reword` landed: it
-   re-creates commits with `commit-tree`, no rebase needed): a
-   todo list editor driven by `GIT_SEQUENCE_EDITOR` writing a prepared todo file.
+1. ~~Interactive rebase~~ — landed (`rebase.interactive`, `commit.squash`, `commit.drop`, `commit.moveUp`,
+   `commit.moveDown`): the todo list is written by GitCraft and handed to git through
+   `GIT_SEQUENCE_EDITOR`; new messages are applied by `exec` amend lines. Next: rebasing across merges.
 2. ~~Merge tool output editor~~ — landed (`conflict.edit`). Next: syntax colours in its panes, a
    base column for `diff3`, editing a picked line in place.
 3. ~~Repository tabs~~ — landed (`ui.tabs`). Drag to reorder landed. Next: workspaces (`workspace.open`).
