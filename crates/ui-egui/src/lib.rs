@@ -154,11 +154,15 @@ impl Prefs {
 }
 
 /// A network command running in the background.
+/// The commands that make a commit from the commit panel (run in the background: hooks).
+const COMMITS: [&str; 2] = ["commit.create", "commit.stageAllAndCommit"];
+
 pub struct Job {
     pub id: &'static str,
     pub label: &'static str,
     pub started: f64,
-    rx: Receiver<CmdResult>,
+    /// The result and the worker session (its undo steps go to the tab's session).
+    rx: Receiver<(CmdResult, Box<Session>)>,
     /// A control-channel request waiting for the result.
     reply: Option<Sender<Value>>,
     /// The tab it runs for (`tabs::Tabs::ids`).
@@ -425,7 +429,15 @@ impl GitApp {
             return r;
         };
         if spec.slow {
-            if let Some(why) = (spec.enabled)(&self.session) {
+            // As `Session::run` does: checked against the work tree as it is now.
+            if spec.mutates
+                && let Some(repo) = &self.session.repo
+                && let Ok(st) = repo.status()
+            {
+                self.session.data.status = st;
+            }
+            let why = if COMMITS.contains(&spec.id) && self.committing() { Some("a commit is running") } else { (spec.enabled)(&self.session) };
+            if let Some(why) = why {
                 let r = Err(format!("{id}: {why}"));
                 if let Some(tx) = reply {
                     let _ = tx.send(control::reply(&r));
@@ -486,7 +498,7 @@ impl GitApp {
                 if id == "repo.close" && self.tabs.len() > 1 {
                     let _ = self.close_tab(self.tabs.active);
                 }
-                if id.starts_with("graph.select") || id == "commit.create" {
+                if id.starts_with("graph.select") || COMMITS.contains(&id) {
                     self.scroll_to_selection = true;
                 }
                 if !id.starts_with("view.") && !id.starts_with("graph.") {
@@ -504,12 +516,16 @@ impl GitApp {
         let (tx, rx) = channel();
         let repo = self.session.repo.clone();
         let git = self.session.git.clone();
+        // The commit panel's message, for a commit.
+        let draft = self.session.draft.clone();
         let started = std::thread::Builder::new().name(format!("gitcraft {id}")).spawn(move || {
             let mut s = match repo {
                 Some(r) => Session::detached(r),
                 None => Session::new(git),
             };
-            let _ = tx.send(s.run(id, &params));
+            s.draft = draft;
+            let r = s.run(id, &params);
+            let _ = tx.send((r, Box::new(s)));
         });
         match started {
             Ok(_) => {
@@ -538,17 +554,17 @@ impl GitApp {
     fn poll_jobs(&mut self) {
         let mut done = Vec::new();
         self.jobs.retain(|j| match j.rx.try_recv() {
-            Ok(r) => {
-                done.push((j.id, r, j.reply.clone(), j.tab, j.quiet));
+            Ok((r, worker)) => {
+                done.push((j.id, r, Some(worker), j.reply.clone(), j.tab, j.quiet));
                 false
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), j.reply.clone(), j.tab, j.quiet));
+                done.push((j.id, Err(CmdError::Failed("the background task stopped".into())), None, j.reply.clone(), j.tab, j.quiet));
                 false
             }
         });
-        for (id, r, reply, tab, quiet) in done {
+        for (id, r, worker, reply, tab, quiet) in done {
             if quiet && r.is_ok() {
                 // An automatic fetch: reload quietly (only when it's the tab on screen).
                 if self.tabs.index_of(tab) == Some(self.tabs.active) {
@@ -580,7 +596,7 @@ impl GitApp {
                 }
             };
             let had_dialog = self.dialog.is_some();
-            self.take_job_result(id, r, reply);
+            self.take_job_result(id, r, worker, reply);
             // Stay when the result opened something (a clone's new tab) or asks something.
             if away
                 && self.tabs.active_id() == tab
@@ -592,7 +608,20 @@ impl GitApp {
         }
     }
 
-    fn take_job_result(&mut self, id: &'static str, r: CmdResult, reply: Option<Sender<Value>>) {
+    fn take_job_result(&mut self, id: &'static str, r: CmdResult, worker: Option<Box<Session>>, reply: Option<Sender<Value>>) {
+        if let Some(w) = worker {
+            self.session.adopt_undo(*w);
+        }
+        // A commit made: the panel's message is used up and the new commit is selected.
+        if COMMITS.contains(&id)
+            && let Ok(v) = &r
+        {
+            self.session.draft.clear();
+            if let Some(oid) = v.get("oid").and_then(Value::as_str) {
+                self.session.sel.row = gitcraft_engine::Selected::Commit(oid.to_string());
+                self.session.sel.file = None;
+            }
+        }
         let reg = self.session.registry.clone();
         if let Some(spec) = reg.get(id) {
             if let Err(e) = self.session.refresh() {
@@ -1052,6 +1081,12 @@ impl GitApp {
 
     pub fn busy(&self, id: &str) -> bool {
         self.jobs.iter().any(|j| j.id == id)
+    }
+
+    /// A commit is running in this tab (its hooks may take a while): the commit panel waits for it.
+    pub fn committing(&self) -> bool {
+        let tab = self.tabs.active_id();
+        self.jobs.iter().any(|j| j.tab == tab && COMMITS.contains(&j.id))
     }
 }
 

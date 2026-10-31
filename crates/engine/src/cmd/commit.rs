@@ -176,6 +176,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("commit.create", "Commit", "Commit Panel", create)
             .key("Mod+Enter")
             .params(r#"{"summary"?: string, "description"?: string, "amend"?: bool, "sign"?: bool, "noVerify"?: bool} (default: the commit panel's)"#)
+            .slow()
             .when(need_repo),
         CommandSpec::new("commit.stageAllAndCommit", "Stage All and Commit", "Commit Panel", |s, v| {
             s.repo()?.stage_all()?;
@@ -183,6 +184,7 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .key("Mod+Shift+Enter")
         .params(r#"{"summary"?: string, "description"?: string}"#)
+        .slow()
         .when(super::need_changes),
     ]
 }

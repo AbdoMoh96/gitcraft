@@ -509,6 +509,11 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
 fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Option<(&'static str, Value)>) {
     let t = Tokens::get(ui.ctx());
     ui.separator();
+    // While a commit runs (hooks can take a while) the message and its options wait for it.
+    let committing = app.committing();
+    if committing {
+        ui.disable();
+    }
     ui.horizontal(|ui| {
         ui.label(RichText::new("Commit").strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -568,8 +573,10 @@ fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Opt
         }
     });
     let merging = app.session.data.status.state == RepoState::Merging;
-    let can = (staged > 0 || app.session.draft.amend || merging) && (!app.session.draft.summary.trim().is_empty() || merging);
-    let label = if app.session.draft.amend {
+    let can = !committing && (staged > 0 || app.session.draft.amend || merging) && (!app.session.draft.summary.trim().is_empty() || merging);
+    let label = if committing {
+        "Committing…".to_string()
+    } else if app.session.draft.amend {
         "Amend Previous Commit".to_string()
     } else if staged == 0 && !merging {
         "Stage files to commit".to_string()
@@ -579,9 +586,14 @@ fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Opt
         format!("Commit changes to {staged} file{}", if staged == 1 { "" } else { "s" })
     };
     let b = egui::Button::new(RichText::new(label).color(Color32::WHITE).strong())
-        .fill(if can { crate::theme::APP_COLOR } else { t.dim })
+        .fill(if can || committing { crate::theme::APP_COLOR } else { t.dim })
         .min_size(vec2(ui.available_width(), 32.0));
-    if ui.add_enabled(can, b).on_hover_text(util::shortcut_label("Mod+Enter")).clicked() {
+    let r = ui.add_enabled(can, b);
+    if committing {
+        let c = pos2(r.rect.left() + 18.0, r.rect.center().y);
+        egui::Spinner::new().size(14.0).color(Color32::WHITE).paint_at(ui, egui::Rect::from_center_size(c, vec2(14.0, 14.0)));
+        r.on_disabled_hover_text("Waiting for the commit and its hooks to finish");
+    } else if r.on_hover_text(util::shortcut_label("Mod+Enter")).clicked() {
         *run = Some(("commit.create", json!({})));
     }
 }

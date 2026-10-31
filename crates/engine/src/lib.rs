@@ -55,7 +55,7 @@ pub struct CommandSpec {
     pub params: &'static str,
     /// Changes the repository (the session reloads it afterwards).
     pub mutates: bool,
-    /// Talks to a remote and may take a while: the app runs it in the background.
+    /// Talks to a remote or runs hooks and may take a while: the app runs it in the background.
     pub slow: bool,
     /// `None` = enabled; `Some(reason)` = disabled.
     pub enabled: fn(&Session) -> Option<&'static str>,
@@ -83,7 +83,7 @@ impl CommandSpec {
         self.mutates = false;
         self
     }
-    /// Network: run in the background.
+    /// Network or hooks: run in the background.
     pub const fn slow(mut self) -> Self {
         self.slow = true;
         self

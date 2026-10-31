@@ -240,6 +240,13 @@ impl Session {
         }
     }
 
+    /// Take back the undo steps a background worker ([`Session::detached`]) recorded.
+    pub fn adopt_undo(&mut self, worker: Session) {
+        for step in worker.undo {
+            self.push_undo(step);
+        }
+    }
+
     /// Where HEAD is now.
     pub(crate) fn head(&self) -> Option<Head> {
         let repo = self.repo.as_ref()?;

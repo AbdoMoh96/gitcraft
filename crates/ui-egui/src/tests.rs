@@ -37,6 +37,56 @@ fn prefs_round_trip_and_recent() {
     assert_eq!(Prefs::from_json(br#"{"future": 1}"#).unwrap(), Prefs::default());
 }
 
+/// Run frames until the background jobs are done.
+fn finish_jobs(a: &mut GitApp) {
+    let ctx = egui::Context::default();
+    for _ in 0..1000 {
+        a.logic(&ctx);
+        if a.jobs.is_empty() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("background jobs did not finish");
+}
+
+/// A commit waits for its hooks in the background: the panel stays put until it's done.
+#[cfg(unix)]
+#[test]
+fn commit_waits_for_hooks_in_the_background() {
+    use std::os::unix::fs::PermissionsExt;
+    let (d, mut a) = app("ui-commit-hook");
+    let repo = a.session.repo().unwrap().clone();
+    let gate = d.path().join("gate");
+    let hook = repo.hooks_dir().join("pre-commit");
+    std::fs::create_dir_all(repo.hooks_dir()).unwrap();
+    std::fs::write(&hook, format!("#!/bin/sh\nwhile [ ! -e '{}' ]; do sleep 0.05; done\n", gate.display())).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write(&repo, "hooked.txt", "x\n").unwrap();
+    repo.stage_all().unwrap();
+    a.session.draft.summary = "Through the hook".into();
+    let before = repo.find_commit("HEAD").unwrap().oid;
+    let r = a.run("commit.create", json!({})).unwrap();
+    assert_eq!(r["started"], json!("commit.create"));
+    assert!(a.committing());
+    assert!(a.run("commit.create", json!({})).unwrap_err().contains("a commit is running"));
+    let ctx = egui::Context::default();
+    a.logic(&ctx);
+    assert!(a.committing(), "the hook is still running");
+    assert_eq!(a.session.draft.summary, "Through the hook", "the message stays until the commit is made");
+    assert_eq!(repo.find_commit("HEAD").unwrap().oid, before);
+    std::fs::write(&gate, "").unwrap();
+    finish_jobs(&mut a);
+    assert!(!a.committing());
+    let head = repo.find_commit("HEAD").unwrap();
+    assert_eq!(head.summary, "Through the hook");
+    assert!(a.session.draft.summary.is_empty());
+    assert_eq!(a.session.sel.row, gitcraft_engine::Selected::Commit(head.oid.clone()));
+    // The worker's undo step came back to the tab.
+    a.run("edit.undo", json!({})).unwrap();
+    assert_eq!(repo.find_commit("HEAD").unwrap().oid, before);
+}
+
 #[test]
 fn slow_commands_run_in_the_background() {
     let (d, mut a) = app("ui-jobs");
@@ -303,6 +353,7 @@ fn workspaces_and_profiles() {
     a.open_repo(other.root()).unwrap();
     write(a.session.repo().unwrap(), "w.txt", "w\n").unwrap();
     a.run("commit.stageAllAndCommit", json!({"summary": "At work"})).unwrap();
+    finish_jobs(&mut a);
     assert_eq!(a.session.repo().unwrap().find_commit("HEAD").unwrap().author.email, "grace@work.example");
     a.ui_command("ui.profile", &json!({"action": "switch", "name": ""})).unwrap();
     assert_eq!(a.tabs.len(), 2, "the first profile's tabs");
