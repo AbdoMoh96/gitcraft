@@ -234,7 +234,10 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             }
             let font = FontId::monospace(FONT);
             let (cw, ch) = ui.fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
-            let area = ui.available_rect_before_wrap().shrink(4.0);
+            // Take the whole panel (a resizable panel keeps the height its content uses, so
+            // anything smaller shrinks it every frame) and draw inside a small inset.
+            let full = ui.available_rect_before_wrap();
+            let area = full.shrink(4.0);
             let cols = ((area.width() / cw.max(1.0)) as u16).max(10);
             let rows = ((area.height() / ch.max(1.0)) as u16).max(2);
             if app.terminal.is_none() {
@@ -246,7 +249,8 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     }
                 }
             }
-            let (rect, resp) = ui.allocate_exact_size(area.size(), Sense::click());
+            let (_, resp) = ui.allocate_exact_size(full.size(), Sense::click());
+            let rect = area;
             if resp.clicked() || std::mem::take(&mut app.terminal_focus_request) {
                 ui.memory_mut(|m| m.request_focus(resp.id));
             }

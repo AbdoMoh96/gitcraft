@@ -114,6 +114,32 @@ fn slow_commands_run_in_the_background() {
 
 /// Lays out the whole window headlessly (no GPU) in each state: no repository, the graph, a diff,
 /// a commit's details, every dialog and the palette.
+/// The terminal panel keeps the height it is given: it used to lose a few pixels every frame.
+#[test]
+fn terminal_panel_keeps_its_height() {
+    let (_d, mut a) = app("ui-term-height");
+    a.terminal_open = true;
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let id = egui::Id::new("terminal_panel");
+    let mut heights = Vec::new();
+    for _ in 0..20 {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+        if a.terminal.is_none() {
+            return; // No shell here.
+        }
+        heights.extend(egui::containers::panel::PanelState::load(&ctx, id).map(|p| p.size().y));
+    }
+    let (first, last) = (heights.first().copied().unwrap(), heights.last().copied().unwrap());
+    assert!((first - last).abs() < 0.5, "the terminal shrank from {first} to {last}");
+}
+
 #[test]
 fn every_view_lays_out() {
     let (_d, mut a) = app("ui-layout");
