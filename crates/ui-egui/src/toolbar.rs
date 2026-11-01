@@ -115,6 +115,16 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     if icons::button(ui, if dark { Icon::Sun } else { Icon::Moon }, "Switch light and dark", None, 18.0).clicked() {
                         let _ = app.ui_command("ui.theme", &json!({"value": if dark { "light" } else { "dark" }}));
                     }
+                    if app.session.repo.is_some() {
+                        let (icon, tip) = if app.graph_only {
+                            (Icon::GraphOnly, "Show the side panels")
+                        } else {
+                            (Icon::Panels, "Hide the side panels (graph only)")
+                        };
+                        if icons::button(ui, icon, tip, None, 18.0).clicked() {
+                            let _ = app.ui_command("ui.graphOnly", &json!({}));
+                        }
+                    }
                     if icons::button(ui, Icon::Palette, &format!("Command palette ({})", util::shortcut_label("Mod+P")), None, 18.0).clicked() {
                         let _ = app.ui_command("ui.commandPalette", &json!({}));
                     }

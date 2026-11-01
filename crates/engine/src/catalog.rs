@@ -198,6 +198,7 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.commandPalette",
     "ui.shortcuts",
     "ui.theme",
+    "ui.graphOnly",
     "ui.preferences",
     "ui.zoom",
     "ui.editFile",

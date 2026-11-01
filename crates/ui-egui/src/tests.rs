@@ -140,6 +140,23 @@ fn terminal_panel_keeps_its_height() {
     assert!((first - last).abs() < 0.5, "the terminal shrank from {first} to {last}");
 }
 
+/// Graph only hides the side panels and brings them back as they were.
+#[test]
+fn graph_only_hides_and_shows_the_side_panels() {
+    let (_d, mut a) = app("ui-graph-only");
+    a.session.draft.summary = "Half written".into();
+    a.ref_filter = "ma".into();
+    assert_eq!(a.ui_command("ui.graphOnly", &json!({})).unwrap()["value"], json!(true));
+    let ctx = egui::Context::default();
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+    let mut out = ctx.run_ui(input, |ui| a.ui(ui));
+    out.textures_delta.clear();
+    assert_eq!(a.ui_command("ui.graphOnly", &json!({})).unwrap()["value"], json!(false));
+    assert_eq!((a.session.draft.summary.as_str(), a.ref_filter.as_str()), ("Half written", "ma"));
+    assert!(a.session.view.left_panel);
+    assert_eq!(a.ui_command("ui.graphOnly", &json!({"value": true})).unwrap()["value"], json!(true));
+}
+
 #[test]
 fn every_view_lays_out() {
     let (_d, mut a) = app("ui-layout");

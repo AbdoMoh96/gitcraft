@@ -238,6 +238,8 @@ pub struct GitApp {
     /// The built-in terminal (its shell keeps running while the panel is hidden).
     pub terminal: Option<terminal::Terminal>,
     pub terminal_open: bool,
+    /// The side panels are hidden: the graph takes the window (their state is kept).
+    pub graph_only: bool,
     /// The terminal had the keyboard last frame: app shortcuts stay out of its way.
     pub terminal_focused: bool,
     /// Give the terminal the keyboard on the next frame (it was just opened).
@@ -331,6 +333,7 @@ impl GitApp {
             editor: None,
             terminal: None,
             terminal_open: false,
+            graph_only: false,
             terminal_focused: false,
             terminal_focus_request: false,
             pending_terminal_input: None,
@@ -667,6 +670,10 @@ impl GitApp {
             "ui.preferences" => {
                 self.dialog = Some(Dialog::Preferences);
                 Ok(json!({}))
+            }
+            "ui.graphOnly" => {
+                self.graph_only = v.get("value").and_then(Value::as_bool).unwrap_or(!self.graph_only);
+                Ok(json!({"value": self.graph_only}))
             }
             "ui.theme" => {
                 let a = match s("value") {
@@ -1039,10 +1046,13 @@ impl GitApp {
             } else {
                 self.terminal_focused = false;
             }
-            if self.session.view.left_panel {
+            // Graph only hides the side panels; what they hold stays as it is.
+            if self.session.view.left_panel && !self.graph_only {
                 refs_panel::show(self, ui);
             }
-            commit_panel::show(self, ui);
+            if !self.graph_only {
+                commit_panel::show(self, ui);
+            }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(&ctx).bg)).show(ui, |ui| {
                 if self.editor.is_some() {
                     editor::show(self, ui);

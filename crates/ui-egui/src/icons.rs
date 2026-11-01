@@ -39,6 +39,10 @@ pub enum Icon {
     Pencil,
     Terminal,
     Radar,
+    /// The window with its side panels (click to hide them).
+    Panels,
+    /// The window with the graph only (click to bring the side panels back).
+    GraphOnly,
 }
 
 struct Pen<'a> {
@@ -159,6 +163,21 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32, a: Color32) {
             pen.line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
         Icon::Minus => pen.line(&[(4.0, 10.0), (16.0, 10.0)]),
+        Icon::Panels => {
+            // A window split in three: the side panels shaded in the accent colour.
+            pen.fill(&[(2.5, 4.0), (6.5, 4.0), (6.5, 16.0), (2.5, 16.0)], pen.a.gamma_multiply(0.35));
+            pen.fill(&[(13.5, 4.0), (17.5, 4.0), (17.5, 16.0), (13.5, 16.0)], pen.a.gamma_multiply(0.35));
+            pen.closed(&[(2.5, 4.0), (17.5, 4.0), (17.5, 16.0), (2.5, 16.0)]);
+            pen.line(&[(6.5, 4.0), (6.5, 16.0)]);
+            pen.line(&[(13.5, 4.0), (13.5, 16.0)]);
+        }
+        Icon::GraphOnly => {
+            // A window with the middle opened out to both sides.
+            pen.closed(&[(2.5, 4.0), (17.5, 4.0), (17.5, 16.0), (2.5, 16.0)]);
+            pen.line_c(&[(7.0, 10.0), (13.0, 10.0)], pen.a);
+            pen.line_c(&[(8.8, 8.2), (7.0, 10.0), (8.8, 11.8)], pen.a);
+            pen.line_c(&[(11.2, 8.2), (13.0, 10.0), (11.2, 11.8)], pen.a);
+        }
         Icon::Radar => {
             // A scope with its range rings, the sweep and one blip in the accent colour.
             pen.circle(10.0, 10.0, 7.5, pen.c);

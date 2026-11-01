@@ -81,6 +81,7 @@ pub fn entries(app: &GitApp, query: &str) -> Vec<Entry> {
         ("ui.preferences", "Preferences", "Settings"),
         ("ui.shortcuts", "Keyboard Shortcuts", "Help"),
         ("ui.theme", "Switch Light/Dark Theme", "View"),
+        ("ui.graphOnly", "Hide/Show Side Panels (Graph Only)", "View"),
         ("ui.revealRepo", "Show in File Manager", "Repository"),
         ("ui.terminal", "Open Terminal", "Repository"),
         ("ui.tabs", "New Tab", "Tabs"),
