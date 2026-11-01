@@ -1,5 +1,5 @@
 //! Hosting, AI and team views: the left panel's pull requests, issues and CI; and the dialogs for
-//! creating a pull request, the launchpad, accounts, insights, team overlap and AI answers.
+//! creating a pull request, Radar (the launchpad), accounts, insights, team overlap and AI answers.
 
 use std::collections::HashMap;
 
@@ -285,9 +285,11 @@ fn item_list(app: &mut GitApp, ui: &mut egui::Ui, title: &str, items: &[Value]) 
 
 pub(crate) fn launchpad_body(app: &mut GitApp, ui: &mut egui::Ui) -> Close {
     ui.set_width(620.0);
-    ui.heading("Launchpad");
+    ui.heading("Radar");
     ui.label(
-        RichText::new("Your open pull requests, reviews waiting for you and your issues, across GitHub.").small().color(Tokens::get(ui.ctx()).dim),
+        RichText::new("Your open pull requests, reviews waiting for you and what is assigned to you, across GitHub.")
+            .small()
+            .color(Tokens::get(ui.ctx()).dim),
     );
     ui.add_space(6.0);
     if app.busy("launchpad.open") {
@@ -299,7 +301,8 @@ pub(crate) fn launchpad_body(app: &mut GitApp, ui: &mut egui::Ui) -> Close {
         egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
             item_list(app, ui, "Waiting for your review", v["reviewRequests"].as_array().map(Vec::as_slice).unwrap_or(&[]));
             item_list(app, ui, "Your pull requests", v["myPullRequests"].as_array().map(Vec::as_slice).unwrap_or(&[]));
-            item_list(app, ui, "Assigned to you", v["issues"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+            item_list(app, ui, "Pull requests assigned to you", v["assignedPullRequests"].as_array().map(Vec::as_slice).unwrap_or(&[]));
+            item_list(app, ui, "Issues assigned to you", v["issues"].as_array().map(Vec::as_slice).unwrap_or(&[]));
         });
     }
     if crate::dialogs::buttons(ui, "Close", true, false) != (false, false) {

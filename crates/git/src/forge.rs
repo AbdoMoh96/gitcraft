@@ -439,11 +439,11 @@ pub fn auth_status(kind: ForgeKind) -> (bool, String) {
     }
 }
 
-/// Your open pull requests, the ones waiting for your review and your assigned issues, across
-/// repositories (GitHub only: `gh search`).
+/// Radar: your open pull requests, the ones waiting for your review, and the pull requests and
+/// issues assigned to you, across repositories (GitHub only: `gh search`).
 pub fn launchpad(kind: ForgeKind) -> Result<Value> {
     if kind != ForgeKind::GitHub {
-        return Err(GitError::Arg("the launchpad needs GitHub (gh search)".into()));
+        return Err(GitError::Arg("Radar needs GitHub (gh search)".into()));
     }
     let fields = "number,title,author,state,url,repository,isDraft";
     let mine =
@@ -452,6 +452,8 @@ pub fn launchpad(kind: ForgeKind) -> Result<Value> {
         kind,
         &run_tool(kind, None, &["search", "prs", "--review-requested", "@me", "--state", "open", "--limit", "50", "--json", fields], None)?,
     )?;
+    let assigned =
+        parse_prs(kind, &run_tool(kind, None, &["search", "prs", "--assignee", "@me", "--state", "open", "--limit", "50", "--json", fields], None)?)?;
     let issues = parse_issues(
         kind,
         &run_tool(
@@ -472,7 +474,7 @@ pub fn launchpad(kind: ForgeKind) -> Result<Value> {
             None,
         )?,
     )?;
-    Ok(serde_json::json!({"myPullRequests": mine, "reviewRequests": review, "issues": issues}))
+    Ok(serde_json::json!({"myPullRequests": mine, "reviewRequests": review, "assignedPullRequests": assigned, "issues": issues}))
 }
 
 /// Repositories of the signed-in account (for cloning).

@@ -98,7 +98,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                     let _ = app.run("ui.terminal", json!({}));
                 }
                 if crate::hosting_ui::forge_kind(app) == Some(gitcraft_engine::git::forge::ForgeKind::GitHub) {
-                    let r = icons::tool(ui, Icon::Cloud, "Launchpad", "Your pull requests, reviews and issues across GitHub", None);
+                    let r = icons::tool(ui, Icon::Radar, "Radar", "Your pull requests, reviews and assigned work across GitHub", None);
                     if r.clicked() {
                         app.dialog = Some(Dialog::Launchpad);
                         if !app.hosting.contains_key("launchpad.open") {

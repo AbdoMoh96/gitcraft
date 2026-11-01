@@ -107,7 +107,7 @@ pub fn specs() -> Vec<CommandSpec> {
         .params(r#"{"provider"?: "github" | "gitlab"}"#)
         .pure()
         .slow(),
-        CommandSpec::new("launchpad.open", "Launchpad", "Toolbar", |s, v| Ok(forge::launchpad(kind(s, v)?)?))
+        CommandSpec::new("launchpad.open", "Radar", "Toolbar", |s, v| Ok(forge::launchpad(kind(s, v)?)?))
             .params(r#"{"provider"?: "github"}"#)
             .pure()
             .slow(),

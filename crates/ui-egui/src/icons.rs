@@ -38,6 +38,7 @@ pub enum Icon {
     ChevronUp,
     Pencil,
     Terminal,
+    Radar,
 }
 
 struct Pen<'a> {
@@ -158,6 +159,15 @@ pub fn paint(p: &Painter, r: Rect, icon: Icon, c: Color32, a: Color32) {
             pen.line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
         Icon::Minus => pen.line(&[(4.0, 10.0), (16.0, 10.0)]),
+        Icon::Radar => {
+            // A scope with its range rings, the sweep and one blip in the accent colour.
+            pen.circle(10.0, 10.0, 7.5, pen.c);
+            pen.circle(10.0, 10.0, 3.8, pen.c);
+            pen.fill(&[(10.0, 10.0), (15.3, 4.7), (17.1, 7.4)], pen.a.gamma_multiply(0.35));
+            pen.line_c(&[(10.0, 10.0), (15.3, 4.7)], pen.a);
+            pen.dot(13.2, 13.4, 1.3, pen.a);
+            pen.dot(10.0, 10.0, 1.1, pen.c);
+        }
         Icon::Terminal => {
             // A window with a prompt and a cursor.
             pen.closed(&[(2.5, 4.0), (17.5, 4.0), (17.5, 16.0), (2.5, 16.0)]);

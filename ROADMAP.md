@@ -16,8 +16,8 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 - **2026-10-28 — M6.** Hosting through GitHub's `gh` and GitLab's `glab` (they keep the sign-in;
   GitCraft never sees a token): Pull Requests, Issues and CI sections in the left panel (`pr.list`,
   `issues.list`, `ci.list`; open, check out a pull request, branch for an issue), Create Pull Request
-  from a branch's menu (`pr.create`: pushes the branch first), the Launchpad (`launchpad.open`: your
-  pull requests, reviews waiting for you and assigned issues across GitHub), Clone › your
+  from a branch's menu (`pr.create`: pushes the branch first), Radar (the Launchpad, `launchpad.open`: your
+  pull requests, reviews waiting for you, assigned pull requests and issues across GitHub), Clone › your
   repositories (`hosting.repos`), Share as Cloud Patch (`cloudpatch.create`: a secret gist or private
   snippet), and Accounts (`integrations.connect`: status, and Sign In runs `gh auth login` in the
   terminal). AI through a command the user sets (`gitcraft.aiCommand`, Accounts and AI; off by
