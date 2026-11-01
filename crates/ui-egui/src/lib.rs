@@ -89,6 +89,8 @@ pub struct Prefs {
     pub tree_view: bool,
     /// The Terminal button opens the terminal panel inside GitCraft (else the desktop's terminal).
     pub builtin_terminal: bool,
+    /// Graph column widths dragged in its header.
+    pub column_widths: graph_view::ColumnWidths,
 }
 
 /// A named group of repositories.
@@ -134,6 +136,7 @@ impl Default for Prefs {
             active_profile: String::new(),
             tree_view: false,
             builtin_terminal: true,
+            column_widths: Default::default(),
         }
     }
 }

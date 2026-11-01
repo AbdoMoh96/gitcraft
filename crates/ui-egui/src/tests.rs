@@ -326,6 +326,52 @@ fn hover_lists_every_branch_on_a_commit() {
 }
 
 /// Dragging a tab along the strip reorders the tabs; a plain click still switches.
+/// Dragging a column edge in the graph's header resizes it; double-clicking resets it.
+#[test]
+fn drag_a_graph_column_edge() {
+    let (_d, mut a) = app("ui-col-drag");
+    // Graph only: the graph starts at the window's left edge.
+    a.graph_only = true;
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let frame = |a: &mut GitApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+        out.platform_output.cursor_icon
+    };
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut a, vec![]);
+    // The header row sits under the tab strip and the toolbar; find it by hovering the refs edge.
+    let y =
+        (90..140).map(|y| y as f32).find(|&y| frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(180.0, y))]) == egui::CursorIcon::ResizeColumn);
+    let y = y.expect("a resize handle on the BRANCH / TAG column's edge");
+    frame(&mut a, vec![button(egui::pos2(180.0, y), true)]);
+    for x in [200.0, 240.0, 260.0] {
+        frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(x, y))]);
+    }
+    frame(&mut a, vec![button(egui::pos2(260.0, y), false)]);
+    let w = a.prefs.column_widths.refs.expect("the column was resized");
+    assert!((w - 260.0).abs() < 1.0, "{w}");
+    // Kept between runs.
+    let back = Prefs::from_json(&serde_json::to_vec(&a.prefs).unwrap()).unwrap();
+    assert_eq!(back.column_widths, a.prefs.column_widths);
+    // Double-click its edge: back to the default.
+    frame(&mut a, vec![egui::Event::PointerMoved(egui::pos2(260.0, y))]);
+    for _ in 0..2 {
+        frame(&mut a, vec![button(egui::pos2(260.0, y), true)]);
+        frame(&mut a, vec![button(egui::pos2(260.0, y), false)]);
+    }
+    assert_eq!(a.prefs.column_widths.refs, None);
+}
+
 #[test]
 fn drag_a_tab_to_reorder() {
     let (_d, mut a) = app("ui-tab-drag");

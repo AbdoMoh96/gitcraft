@@ -22,6 +22,55 @@ const DATE_W: f32 = 110.0;
 const SHA_W: f32 = 70.0;
 /// Lanes drawn at most; wider graphs are cut at the column's edge.
 const MAX_GRAPH_W: f32 = 360.0;
+/// Narrowest and widest a column can be dragged.
+const MIN_COL_W: f32 = 40.0;
+const MAX_COL_W: f32 = 800.0;
+
+/// Column widths the user dragged in the graph's header (`None`: the default; the graph's
+/// default fits its lanes). Kept in the preferences; double-click a column's edge to reset it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ColumnWidths {
+    pub refs: Option<f32>,
+    pub graph: Option<f32>,
+    pub author: Option<f32>,
+    pub date: Option<f32>,
+    pub sha: Option<f32>,
+}
+
+/// A resizable column: its slot in [`ColumnWidths`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Col {
+    Refs,
+    Graph,
+    Author,
+    Date,
+    Sha,
+}
+
+impl ColumnWidths {
+    fn slot(&mut self, c: Col) -> &mut Option<f32> {
+        match c {
+            Col::Refs => &mut self.refs,
+            Col::Graph => &mut self.graph,
+            Col::Author => &mut self.author,
+            Col::Date => &mut self.date,
+            Col::Sha => &mut self.sha,
+        }
+    }
+
+    /// The widths to draw with (hidden columns are 0).
+    fn resolve(&self, auto_graph: f32, shown: Columns) -> [f32; 5] {
+        let w = |on: bool, set: Option<f32>, default: f32| if on { set.map_or(default, |x| x.clamp(MIN_COL_W, MAX_COL_W)) } else { 0.0 };
+        [
+            w(shown.refs, self.refs, REFS_W),
+            w(true, self.graph, auto_graph),
+            w(shown.author, self.author, AUTHOR_W),
+            w(shown.date, self.date, DATE_W),
+            w(shown.sha, self.sha, SHA_W),
+        ]
+    }
+}
 
 /// A label on a row: a branch (local, its remote twin, or both), a remote branch, or a tag.
 struct Label {
@@ -65,15 +114,14 @@ struct Cols {
     sha: Rect,
 }
 
-fn columns(row: Rect, graph_w: f32, shown: Columns) -> Cols {
+fn columns(row: Rect, widths: [f32; 5]) -> Cols {
     let mut x = row.left();
     let mut take = |w: f32| {
         let r = Rect::from_min_size(pos2(x, row.top()), vec2(w, row.height()));
         x += w;
         r
     };
-    let w = |on: bool, w: f32| if on { w } else { 0.0 };
-    let (refs_w, author_w, date_w, sha_w) = (w(shown.refs, REFS_W), w(shown.author, AUTHOR_W), w(shown.date, DATE_W), w(shown.sha, SHA_W));
+    let [refs_w, graph_w, author_w, date_w, sha_w] = widths;
     let refs = take(refs_w);
     let graph = take(graph_w);
     let msg_w = (row.width() - refs_w - graph_w - author_w - date_w - sha_w).max(120.0);
@@ -82,6 +130,41 @@ fn columns(row: Rect, graph_w: f32, shown: Columns) -> Cols {
     let date = take(date_w);
     let sha = take(sha_w);
     Cols { refs, graph, msg, author, date, sha }
+}
+
+/// Drag handles on the header's column edges: the columns left of the message grow from their
+/// right edge, the ones right of it from their left edge. Double-click resets a column.
+fn column_handles(app: &mut GitApp, ui: &mut egui::Ui, hdr: Rect, c: &Cols, widths: [f32; 5], shown: Columns) {
+    let t = Tokens::get(ui.ctx());
+    let [refs_w, graph_w, author_w, date_w, sha_w] = widths;
+    let edges = [
+        (Col::Refs, shown.refs, c.refs.right(), refs_w, 1.0),
+        (Col::Graph, true, c.graph.right(), graph_w, 1.0),
+        (Col::Author, shown.author, c.author.left(), author_w, -1.0),
+        (Col::Date, shown.date, c.date.left(), date_w, -1.0),
+        (Col::Sha, shown.sha, c.sha.left(), sha_w, -1.0),
+    ];
+    for (col, on, x, w, dir) in edges {
+        if !on {
+            continue;
+        }
+        let r = Rect::from_center_size(pos2(x, hdr.center().y), vec2(8.0, hdr.height()));
+        let resp = ui.interact(r, ui.id().with(("column_edge", col as u8)), Sense::click_and_drag());
+        let active = resp.hovered() || resp.dragged();
+        if active {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+        }
+        let line = if active { t.accent } else { t.border };
+        ui.painter().line_segment([pos2(x, hdr.top() + 5.0), pos2(x, hdr.bottom() - 5.0)], Stroke::new(1.0, line));
+        if resp.double_clicked() {
+            *app.prefs.column_widths.slot(col) = None;
+        } else if resp.dragged() {
+            let dx = resp.drag_delta().x * dir;
+            if dx != 0.0 {
+                *app.prefs.column_widths.slot(col) = Some((w + dx).clamp(MIN_COL_W, MAX_COL_W));
+            }
+        }
+    }
 }
 
 fn lane_x(graph: Rect, lane: usize) -> f32 {
@@ -98,19 +181,21 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     let d = &app.session.data;
     let wip = !d.status.is_clean() || d.commits.is_empty();
     let lane_count = d.graph.width.max(1);
-    let graph_w = (20.0 + lane_count as f32 * LANE_W).clamp(48.0, MAX_GRAPH_W);
+    let auto_graph = (20.0 + lane_count as f32 * LANE_W).clamp(48.0, MAX_GRAPH_W);
     let n = d.commits.len() + usize::from(wip) + usize::from(d.more);
 
     // Header.
     let shown = app.session.view.columns;
     let (hdr, hdr_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
     ui.painter().rect_filled(hdr, 0.0, t.chrome);
-    let c = columns(hdr, graph_w, shown);
+    let widths = app.prefs.column_widths.resolve(auto_graph, shown);
+    let c = columns(hdr, widths);
     let hf = FontId::proportional(11.0);
     let title = if let Some(p) = &app.session.view.history { format!("HISTORY OF {p}") } else { "COMMIT MESSAGE".into() };
     for (r, s) in [(c.refs, "BRANCH / TAG"), (c.graph, "GRAPH"), (c.msg, title.as_str()), (c.author, "AUTHOR"), (c.date, "DATE"), (c.sha, "COMMIT")] {
         text_in(ui.painter(), r, s, hf.clone(), t.dim);
     }
+    column_handles(app, ui, hdr, &c, widths, shown);
     if app.session.view.history.is_some() {
         let b = Rect::from_min_size(pos2(c.msg.right() - 120.0, hdr.top() + 2.0), vec2(116.0, 20.0));
         if ui.put(b, egui::Button::new(egui::RichText::new("Show all commits").small())).clicked() {
@@ -203,7 +288,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
         let head_lane = head_row.and_then(|r| d.graph.rows.get(r)).map(|r| r.lane).unwrap_or(0);
         for i in range {
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-            let cols = columns(rect, graph_w, shown);
+            let cols = columns(rect, widths);
             let p = ui.painter().clone();
             let selected = selected_row == Some(i);
             if selected {
