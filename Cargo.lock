@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "gitcraft"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1349,7 +1349,7 @@ dependencies = [
 
 [[package]]
 name = "gitcraft-cli"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "gitcraft-engine",
  "gitcraft-git",
@@ -1359,11 +1359,11 @@ dependencies = [
 
 [[package]]
 name = "gitcraft-control-key"
-version = "0.1.2"
+version = "1.0.0"
 
 [[package]]
 name = "gitcraft-engine"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "gitcraft-git",
  "gitcraft-graph",
@@ -1375,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "gitcraft-git"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "log",
  "serde",
@@ -1385,14 +1385,14 @@ dependencies = [
 
 [[package]]
 name = "gitcraft-graph"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "gitcraft-mcp"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "gitcraft-control-key",
  "gitcraft-engine",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "gitcraft-ui-egui"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -4466,7 +4466,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.2"
+version = "1.0.0"
 dependencies = [
  "serde_json",
 ]
