@@ -23,6 +23,8 @@ pub struct Parked {
     pub reword: Option<Reword>,
     pub ref_filter: String,
     pub merge: Option<MergeTool>,
+    /// Its pull requests, issues, CI runs and AI answers ([`crate::hosting_ui::take_repo_results`]).
+    pub hosting: HashMap<String, Value>,
 }
 
 /// The tab strip's state.
@@ -77,9 +79,17 @@ impl GitApp {
             reword: std::mem::replace(&mut self.reword, p.reword),
             ref_filter: std::mem::replace(&mut self.ref_filter, p.ref_filter),
             merge: std::mem::replace(&mut self.merge, p.merge),
+            hosting: crate::hosting_ui::take_repo_results(&mut self.hosting),
         };
+        self.hosting.extend(p.hosting);
+        // Caches keyed by a session's reload generation, and picks: about the tab left behind.
         self.blame = None;
         self.details = None;
+        self.minimap = None;
+        self.words = Default::default();
+        self.images = None;
+        self.picked_branches.clear();
+        self.picked_commits.clear();
         self.drop_menu = None;
         self.label_popup = None;
         self.scroll_to_selection = true;
@@ -113,7 +123,14 @@ impl GitApp {
         let mut session = Session::new(self.session.git.clone());
         session.view.context = self.prefs.context_lines.min(100);
         session.view.commit_limit = self.prefs.commit_limit.clamp(100, 100_000);
-        let out = self.swap_in(Parked { session, pick: LinePick::default(), reword: None, ref_filter: String::new(), merge: None });
+        let out = self.swap_in(Parked {
+            session,
+            pick: LinePick::default(),
+            reword: None,
+            ref_filter: String::new(),
+            merge: None,
+            hosting: HashMap::new(),
+        });
         if let Some(slot) = self.tabs.slots.get_mut(self.tabs.active) {
             *slot = Some(out);
         }
@@ -404,6 +421,28 @@ mod tests {
     use gitcraft_engine::Session;
     use gitcraft_git::testing::sample;
     use serde_json::json;
+
+    /// CI runs, pull requests and issues belong to their tab's repository; account results are shared.
+    #[test]
+    fn hosting_results_stay_with_their_tab() {
+        let (_d1, r1) = sample("tabs-host-a").unwrap();
+        let (_d2, r2) = sample("tabs-host-b").unwrap();
+        let mut s = Session::new(r1.git().clone());
+        s.set_repo(r1.clone()).unwrap();
+        let mut app = GitApp::new(s, Prefs::default(), Services::default());
+        app.hosting.insert("ci.list".into(), json!({"runs": [{"name": "a"}]}));
+        app.hosting.insert("launchpad.open".into(), json!({"items": []}));
+        app.picked_branches.insert("main".into());
+        app.open_repo(r2.root()).unwrap();
+        assert!(!app.hosting.contains_key("ci.list"), "the new tab loads its own CI runs");
+        assert!(app.hosting.contains_key("launchpad.open"), "account results are shared");
+        assert!(app.picked_branches.is_empty());
+        app.hosting.insert("ci.list".into(), json!({"runs": [{"name": "b"}]}));
+        app.switch_tab(0).unwrap();
+        assert_eq!(app.hosting["ci.list"]["runs"][0]["name"], json!("a"));
+        app.switch_tab(1).unwrap();
+        assert_eq!(app.hosting["ci.list"]["runs"][0]["name"], json!("b"));
+    }
 
     #[test]
     fn tabs_keep_their_own_repository_and_state() {

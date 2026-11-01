@@ -1,6 +1,8 @@
 //! Hosting, AI and team views: the left panel's pull requests, issues and CI; and the dialogs for
 //! creating a pull request, the launchpad, accounts, insights, team overlap and AI answers.
 
+use std::collections::HashMap;
+
 use egui::{RichText, Sense, vec2};
 use gitcraft_engine::git::forge::{self, ForgeKind};
 use serde_json::{Value, json};
@@ -11,6 +13,15 @@ use crate::theme::Tokens;
 use crate::{GitApp, util};
 
 /// Background commands whose results the views keep (`GitApp::hosting`).
+/// Results about the account, not one repository: every tab shares them.
+pub const SHARED: &[&str] = &["launchpad.open", "hosting.repos", "integrations.connect"];
+
+/// Take the results about the shown repository out of `kept` (the rest are shared).
+pub fn take_repo_results(kept: &mut HashMap<String, Value>) -> HashMap<String, Value> {
+    let ids: Vec<String> = kept.keys().filter(|k| !SHARED.contains(&k.as_str())).cloned().collect();
+    ids.into_iter().filter_map(|k| kept.remove_entry(&k)).collect()
+}
+
 pub const KEPT: &[&str] = &[
     "pr.list",
     "issues.list",

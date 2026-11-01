@@ -388,7 +388,7 @@ impl GitApp {
     }
 
     fn after_open(&mut self) {
-        self.hosting.clear();
+        hosting_ui::take_repo_results(&mut self.hosting);
         self.pick = LinePick::default();
         self.blame = None;
         self.details = None;
@@ -1079,14 +1079,15 @@ impl GitApp {
         }
     }
 
+    /// A background command `id` is running for the shown tab.
     pub fn busy(&self, id: &str) -> bool {
-        self.jobs.iter().any(|j| j.id == id)
+        let tab = self.tabs.active_id();
+        self.jobs.iter().any(|j| j.tab == tab && j.id == id)
     }
 
     /// A commit is running in this tab (its hooks may take a while): the commit panel waits for it.
     pub fn committing(&self) -> bool {
-        let tab = self.tabs.active_id();
-        self.jobs.iter().any(|j| j.tab == tab && COMMITS.contains(&j.id))
+        COMMITS.iter().any(|id| self.busy(id))
     }
 }
 
