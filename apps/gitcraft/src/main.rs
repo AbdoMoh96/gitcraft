@@ -205,6 +205,10 @@ fn main() -> std::process::ExitCode {
             let services = Services {
                 pick_folder: Some(Box::new(|title: &str| rfd::FileDialog::new().set_title(title).pick_folder())),
                 avatar_cache: gitcraft_control_key::settings_dir().map(|d| d.join("avatars")),
+                pick_file: Some(Box::new(|title: &str| {
+                    rfd::FileDialog::new().set_title(title).add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp", "bmp"]).pick_file()
+                })),
+                pictures: gitcraft_control_key::settings_dir().map(|d| gitcraft_ui_egui::people::pictures_dir(&d)),
             };
             let mut app = GitApp::new(session, prefs, services);
             // The last run's tabs (the first one is open already).

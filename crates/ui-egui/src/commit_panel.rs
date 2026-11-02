@@ -640,10 +640,17 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             let name = s(&c["author"]["name"]);
-            let (r, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-            app.avatars.paint_or_initials(ui.painter(), r.center(), 14.0, &s(&c["author"]["email"]), &name, Color32::WHITE);
+            let email = s(&c["author"]["email"]);
+            // The picture and the name open the person's page (nickname, picture).
+            let (r, pic) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
+            app.avatars.paint_or_initials(ui.painter(), r.center(), 14.0, &email, &name, Color32::WHITE);
+            if pic.on_hover_text("Nickname and picture…").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                crate::people::open(app, &email, &name);
+            }
             ui.vertical(|ui| {
-                ui.label(RichText::new(format!("{name} <{}>", s(&c["author"]["email"]))).strong());
+                let shown = app.avatars.display_name(&email, &name).to_string();
+                let text = if shown == name { format!("{name} <{email}>") } else { format!("{shown} ({name}) <{email}>") };
+                crate::people::clickable_name(app, ui, &email, &name, RichText::new(text).strong());
                 let time = c["author"]["time"].as_i64().unwrap_or(0);
                 ui.label(RichText::new(format!("authored {}", util::date_time(time))).small().weak());
                 let committer = s(&c["committer"]["name"]);

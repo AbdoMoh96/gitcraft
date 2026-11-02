@@ -19,6 +19,7 @@ pub mod hosting_ui;
 pub mod icons;
 pub mod merge_tool;
 pub mod palette;
+pub mod people;
 pub mod refs_panel;
 pub mod start;
 pub mod tabs;
@@ -46,6 +47,10 @@ pub struct Services {
     pub pick_folder: Option<Box<dyn Fn(&str) -> Option<PathBuf>>>,
     /// Folder for downloaded author pictures; `None` turns Gravatar off (tests, headless shots).
     pub avatar_cache: Option<PathBuf>,
+    /// Ask the user for an image file (blocking); `None` when cancelled or unavailable.
+    pub pick_file: Option<Box<dyn Fn(&str) -> Option<PathBuf>>>,
+    /// Folder for pictures imported on person pages; `None`: they can't be imported.
+    pub pictures: Option<PathBuf>,
 }
 
 /// Preferences kept between runs (`ui.json` in the settings folder).
@@ -91,6 +96,8 @@ pub struct Prefs {
     pub builtin_terminal: bool,
     /// Graph column widths dragged in its header.
     pub column_widths: graph_view::ColumnWidths,
+    /// Nicknames and pictures picked for people (you too), by e-mail address: every repository.
+    pub people: std::collections::BTreeMap<String, people::Person>,
 }
 
 /// A named group of repositories.
@@ -137,6 +144,7 @@ impl Default for Prefs {
             tree_view: false,
             builtin_terminal: true,
             column_widths: Default::default(),
+            people: Default::default(),
         }
     }
 }
@@ -261,6 +269,8 @@ pub struct GitApp {
     zoom_seen: f32,
     /// The image diff on screen: key, old and new pictures.
     pub images: Option<(String, Option<egui::TextureHandle>, Option<egui::TextureHandle>)>,
+    /// Someone's page (nickname and picture) open in the center.
+    pub person: Option<people::PersonView>,
 }
 
 /// The commit panel's message editor for an existing commit.
@@ -278,7 +288,9 @@ const CHECK_EVERY_S: f64 = 3.0;
 
 impl GitApp {
     pub fn new(session: Session, prefs: Prefs, services: Services) -> Self {
-        let avatars = avatars::Avatars::new(services.avatar_cache.clone().filter(|_| prefs.gravatar));
+        let mut avatars = avatars::Avatars::new(services.avatar_cache.clone().filter(|_| prefs.gravatar));
+        avatars.set_pictures_dir(services.pictures.clone());
+        avatars.set_people(&prefs.people);
         let mut s = session;
         // The active profile's author.
         if let Some(p) = prefs.profiles.iter().find(|p| p.name == prefs.active_profile && !prefs.active_profile.is_empty()) {
@@ -346,6 +358,7 @@ impl GitApp {
             picked_commits: Vec::new(),
             last_auto_fetch: util::now_s(),
             images: None,
+            person: None,
         }
     }
 
@@ -506,6 +519,10 @@ impl GitApp {
                 }
                 if id.starts_with("graph.select") || COMMITS.contains(&id) {
                     self.scroll_to_selection = true;
+                }
+                // Picking a file shows its diff: the person page makes way.
+                if id == "file.select" {
+                    self.person = None;
                 }
                 if !id.starts_with("view.") && !id.starts_with("graph.") {
                     self.pick.lines.clear();
@@ -724,6 +741,7 @@ impl GitApp {
                 Ok(json!({"value": self.prefs.tree_view}))
             }
             "ui.profile" => self.profile_command(v),
+            "ui.person" => self.person_command(v),
             "ui.pin" => {
                 let name = s("name").ok_or("`name` is required")?.to_string();
                 if !self.session.data.local_branches().any(|r| r.name == name) {
@@ -1057,7 +1075,9 @@ impl GitApp {
                 commit_panel::show(self, ui);
             }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(&ctx).bg)).show(ui, |ui| {
-                if self.editor.is_some() {
+                if self.person.is_some() {
+                    people::show(self, ui);
+                } else if self.editor.is_some() {
                     editor::show(self, ui);
                 } else if let Some(path) = self.conflicted_selection() {
                     merge_tool::show(self, ui, &path);

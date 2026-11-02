@@ -1,9 +1,10 @@
-//! Authors' pictures from Gravatar: fetched on background threads, kept on disk for a week, and
-//! painted as circles. Anyone without a picture (or while it loads, or offline) gets their
+//! Authors' pictures: the one picked for them on their person page ([`crate::people`]: a cat or an
+//! imported image), else their Gravatar, fetched on background threads, kept on disk for a week.
+//! Painted as circles. Anyone without a picture (or while it loads, or offline) gets their
 //! initials on a colour of their own.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -13,6 +14,7 @@ use egui::epaint::RectShape;
 use egui::{Align2, Color32, ColorImage, CornerRadius, FontId, Painter, Pos2, Rect, TextureHandle, TextureId, TextureOptions, pos2, vec2};
 use sha2::{Digest, Sha256};
 
+use crate::people::{self, CATS, Person, Picture};
 use crate::util;
 
 /// Pixels asked for (a 2× circle of the largest size we paint).
@@ -44,6 +46,12 @@ pub struct Avatars {
     requests: RefCell<Option<Sender<String>>>,
     done_tx: Sender<Done>,
     done_rx: Receiver<Done>,
+    /// Nicknames and pictures picked for people, by [`people::key`].
+    people: BTreeMap<String, Person>,
+    /// Where imported pictures are.
+    pictures: Option<PathBuf>,
+    /// Cats and imported pictures, decoded (`None`: unreadable).
+    local: RefCell<HashMap<Picture, Option<TextureHandle>>>,
 }
 
 impl Avatars {
@@ -51,7 +59,35 @@ impl Avatars {
     pub fn new(dir: Option<PathBuf>) -> Self {
         let (done_tx, done_rx) = channel();
         let enabled = dir.is_some();
-        Avatars { dir, enabled, entries: RefCell::default(), requests: RefCell::default(), done_tx, done_rx }
+        Avatars {
+            dir,
+            enabled,
+            entries: RefCell::default(),
+            requests: RefCell::default(),
+            done_tx,
+            done_rx,
+            people: BTreeMap::new(),
+            pictures: None,
+            local: RefCell::default(),
+        }
+    }
+
+    /// The folder imported pictures are in.
+    pub fn set_pictures_dir(&mut self, dir: Option<PathBuf>) {
+        self.pictures = dir;
+        self.local.get_mut().clear();
+    }
+
+    /// The nicknames and pictures picked for people.
+    pub fn set_people(&mut self, people: &BTreeMap<String, Person>) {
+        self.people = people.clone();
+        // An imported picture may have been replaced under the same name: decode again.
+        self.local.get_mut().retain(|k, _| matches!(k, Picture::Cat(_)));
+    }
+
+    /// The name to show for someone: their nickname, else `name`.
+    pub fn display_name<'a>(&'a self, email: &str, name: &'a str) -> &'a str {
+        people::display_name(&self.people, email, name)
     }
 
     pub fn set_enabled(&mut self, on: bool) {
@@ -76,13 +112,20 @@ impl Avatars {
         }
     }
 
-    /// `email`'s picture, when it has loaded; asks for it the first time.
-    pub fn get(&self, email: &str) -> Option<TextureId> {
-        if !self.enabled {
-            return None;
+    /// `email`'s picture, when it has loaded; asks Gravatar for it the first time.
+    pub fn get(&self, ctx: &egui::Context, email: &str) -> Option<TextureId> {
+        let key = people::key(email)?;
+        match self.people.get(&key).map(|p| &p.picture) {
+            Some(Picture::Initials) => return None,
+            Some(pic @ (Picture::Cat(_) | Picture::File(_))) => {
+                // An imported picture gone missing falls back to Gravatar.
+                if let Some(t) = self.local(ctx, pic) {
+                    return Some(t);
+                }
+            }
+            _ => {}
         }
-        let key = email.trim().to_lowercase();
-        if key.is_empty() || !key.contains('@') {
+        if !self.enabled {
             return None;
         }
         let mut m = self.entries.try_borrow_mut().ok()?;
@@ -107,12 +150,38 @@ impl Avatars {
         req.as_ref().is_some_and(|tx| tx.send(email).is_ok())
     }
 
+    /// A cat or an imported picture, decoded once.
+    fn local(&self, ctx: &egui::Context, pic: &Picture) -> Option<TextureId> {
+        let mut m = self.local.try_borrow_mut().ok()?;
+        if let Some(t) = m.get(pic) {
+            return t.as_ref().map(TextureHandle::id);
+        }
+        let img = match pic {
+            Picture::Cat(n) => usize::from(*n).checked_sub(1).and_then(|i| CATS.get(i)).and_then(|b| decode(b)),
+            Picture::File(f) => {
+                let path = self.pictures.as_ref()?.join(f);
+                let small = std::fs::metadata(&path).is_ok_and(|m| m.len() <= MAX_BYTES * 4);
+                small.then(|| std::fs::read(&path).ok()).flatten().and_then(|b| decode(&b))
+            }
+            _ => None,
+        };
+        let t = img.map(|img| ctx.load_texture(format!("picture:{}", pic.code()), img, TextureOptions::LINEAR));
+        let id = t.as_ref().map(TextureHandle::id);
+        m.insert(pic.clone(), t);
+        id
+    }
+
+    /// Paint built-in cat `n` as a circle; false when it can't be shown.
+    pub fn paint_cat(&self, p: &Painter, c: Pos2, r: f32, n: u8) -> bool {
+        let Some(id) = self.local(p.ctx(), &Picture::Cat(n)) else { return false };
+        circle(p, c, r, id, Color32::WHITE);
+        true
+    }
+
     /// Paint `email`'s picture as a circle of radius `r`, faded by `tint`; false when there is none.
     pub fn paint(&self, p: &Painter, c: Pos2, r: f32, email: &str, tint: Color32) -> bool {
-        let Some(id) = self.get(email) else { return false };
-        let rect = Rect::from_center_size(c, vec2(r * 2.0, r * 2.0));
-        let round = CornerRadius::same(r.round().clamp(0.0, 255.0) as u8);
-        p.add(RectShape::filled(rect, round, tint).with_texture(id, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))));
+        let Some(id) = self.get(p.ctx(), email) else { return false };
+        circle(p, c, r, id, tint);
         true
     }
 
@@ -122,6 +191,12 @@ impl Avatars {
             initials(p, c, r, name, tint);
         }
     }
+}
+
+fn circle(p: &Painter, c: Pos2, r: f32, id: TextureId, tint: Color32) {
+    let rect = Rect::from_center_size(c, vec2(r * 2.0, r * 2.0));
+    let round = CornerRadius::same(r.round().clamp(0.0, 255.0) as u8);
+    p.add(RectShape::filled(rect, round, tint).with_texture(id, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))));
 }
 
 /// A person's initials in a circle of their colour.
@@ -234,8 +309,31 @@ mod tests {
         assert!(decode(b"").is_none());
         assert!(decode(b"\x89PNG\r\n\x1a\njunk").is_none());
         assert!(decode(&[0xff, 0xd8, 0xff, 0, 1, 2]).is_none());
-        let a = Avatars::new(None);
-        assert!(a.get("a@b.c").is_none());
-        assert!(a.get("").is_none());
+        let ctx = egui::Context::default();
+        let mut a = Avatars::new(None);
+        assert!(a.get(&ctx, "a@b.c").is_none());
+        assert!(a.get(&ctx, "").is_none());
+        // A picture that isn't there, a cat out of range: no picture, no panic.
+        let mut people = BTreeMap::new();
+        people.insert("a@b.c".to_string(), Person { nickname: String::new(), picture: Picture::File("00ff.png".into()) });
+        people.insert("c@d.e".to_string(), Person { nickname: String::new(), picture: Picture::Cat(200) });
+        a.set_people(&people);
+        assert!(a.get(&ctx, "a@b.c").is_none());
+        assert!(a.get(&ctx, "c@d.e").is_none());
+    }
+
+    #[test]
+    fn every_cat_decodes_and_paints_instead_of_gravatar() {
+        for (i, b) in CATS.iter().enumerate() {
+            assert!(decode(b).is_some(), "cat {}", i + 1);
+        }
+        let ctx = egui::Context::default();
+        let mut a = Avatars::new(None);
+        let mut people = BTreeMap::new();
+        people.insert("ada@example.com".to_string(), Person { nickname: "Countess".into(), picture: Picture::Cat(7) });
+        a.set_people(&people);
+        assert!(a.get(&ctx, " Ada@Example.com").is_some(), "a cat even with Gravatar off");
+        assert_eq!(a.display_name("ADA@example.com", "Ada Lovelace"), "Countess");
+        assert_eq!(a.display_name("bob@example.com", "Bob"), "Bob");
     }
 }

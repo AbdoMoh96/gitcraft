@@ -452,3 +452,98 @@ fn workspaces_and_profiles() {
     assert!(a.ui_command("ui.profile", &json!({"action": "delete", "name": "Work"})).is_err(), "the active one");
     let _ = d;
 }
+
+/// A person's page: nickname and picture by e-mail, kept in preferences for every repository.
+#[test]
+fn person_nickname_and_picture() {
+    let (d, mut a) = app("ui-person");
+    let pictures = d.path().join("pictures");
+    a.services.pictures = Some(pictures.clone());
+    let author = a.session.data.commits.first().map(|c| (c.author.name.clone(), c.author.email.clone())).unwrap();
+    let r = a.ui_command("ui.person", &json!({"email": author.1.to_uppercase()})).unwrap();
+    assert_eq!(r["email"], json!(author.1.to_lowercase()));
+    assert_eq!(a.person.as_ref().unwrap().name, author.0, "the name from the history");
+    a.ui_command("ui.person", &json!({"action": "set", "email": author.1, "nickname": "  The\nBoss  ", "picture": "cat:7"})).unwrap();
+    let p = a.prefs.people.get(&author.1.to_lowercase()).unwrap().clone();
+    assert_eq!((p.nickname.as_str(), p.picture.code()), ("TheBoss", "cat:7".to_string()));
+    assert_eq!(a.avatars.display_name(&author.1, &author.0), "TheBoss");
+    // Round trip through preferences.
+    let back = Prefs::from_json(&serde_json::to_vec(&a.prefs).unwrap()).unwrap();
+    assert_eq!(back.people, a.prefs.people);
+    // A picture of your own, cropped square and kept in the pictures folder.
+    let src = d.path().join("me.png");
+    image::RgbaImage::from_pixel(300, 120, image::Rgba([200, 30, 30, 255])).save(&src).unwrap();
+    a.ui_command("ui.person", &json!({"action": "set", "email": author.1, "image": src.display().to_string()})).unwrap();
+    let crate::people::Picture::File(f) = a.prefs.people[&author.1.to_lowercase()].picture.clone() else { panic!("not a file") };
+    let kept = image::open(pictures.join(&f)).unwrap();
+    assert_eq!((kept.width(), kept.height()), (120, 120));
+    // Back to a cat: the imported file is no longer needed.
+    a.ui_command("ui.person", &json!({"action": "set", "email": author.1, "picture": "cat:1"})).unwrap();
+    assert!(!pictures.join(&f).exists());
+    // Restore defaults: forgotten altogether.
+    a.ui_command("ui.person", &json!({"action": "reset", "email": author.1})).unwrap();
+    assert!(a.prefs.people.is_empty());
+    assert_eq!(a.ui_command("ui.person", &json!({"action": "list"})).unwrap()["people"], json!([]));
+    // Junk.
+    for bad in [
+        json!({"email": "not-an-address"}),
+        json!({"email": "a b@c.d"}),
+        json!({"email": "<a@b.c>"}),
+        json!({"action": "set", "email": "a@b.c", "picture": "cat:0"}),
+        json!({"action": "set", "email": "a@b.c", "picture": "cat:41"}),
+        json!({"action": "set", "email": "a@b.c", "picture": "file:../../etc/passwd"}),
+        json!({"action": "set", "email": "a@b.c", "picture": 3}),
+        json!({"action": "set", "email": "a@b.c", "nickname": 5}),
+        json!({"action": "set", "email": "a@b.c", "image": "/no/such/file.png"}),
+        json!({"action": "set", "email": "a@b.c", "image": src.parent().unwrap().display().to_string()}),
+        json!({"action": "explode"}),
+    ] {
+        assert!(a.ui_command("ui.person", &bad).is_err(), "{bad}");
+    }
+    let junk = d.path().join("junk.png");
+    std::fs::write(&junk, b"\x89PNG\r\n\x1a\nnot really").unwrap();
+    assert!(a.ui_command("ui.person", &json!({"action": "set", "email": "a@b.c", "image": junk.display().to_string()})).is_err());
+    // Junk in preferences is the default picture, not a failure to load them.
+    let p = Prefs::from_json(br#"{"people": {"a@b.c": {"nickname": "A", "picture": "file:../x"}}}"#).unwrap();
+    assert_eq!(p.people["a@b.c"].picture, crate::people::Picture::Default);
+}
+
+/// The person page lays out, closes with a file pick, and the panel's author opens it.
+#[test]
+fn person_page_lays_out() {
+    let (_d, mut a) = app("ui-person-page");
+    let ctx = egui::Context::default();
+    crate::theme::style(&ctx);
+    let frame = |a: &mut GitApp| {
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| {
+            a.logic(ui.ctx());
+            a.ui(ui);
+        });
+        out.textures_delta.clear();
+    };
+    let email = a.session.data.commits.first().map(|c| c.author.email.clone()).unwrap();
+    a.ui_command("ui.person", &json!({"action": "set", "email": email, "nickname": "Nick", "picture": "cat:3"})).unwrap();
+    a.ui_command("ui.person", &json!({"email": email})).unwrap();
+    frame(&mut a);
+    frame(&mut a);
+    assert!(a.person.is_some());
+    a.run("file.select", json!({"path": "README.md", "area": "commit", "oid": a.session.data.commits[0].oid.clone()})).unwrap();
+    assert!(a.person.is_none(), "a file's diff takes the center");
+    a.ui_command("ui.person", &json!({"email": email})).unwrap();
+    a.ui_command("ui.person", &json!({"action": "close"})).unwrap();
+    assert!(a.person.is_none());
+}
+
+/// With no `email`, the page is yours: git's author identity, or the active profile's.
+#[test]
+fn person_page_defaults_to_you() {
+    let (_d, mut a) = app("ui-person-you");
+    let me = a.my_identity().expect("the test git has an author");
+    let r = a.ui_command("ui.person", &json!({})).unwrap();
+    assert_eq!((r["email"].as_str(), r["you"].as_bool()), (Some(me.1.to_lowercase().as_str()), Some(true)));
+    a.ui_command("ui.profile", &json!({"action": "save", "name": "Work", "gitName": "Grace", "gitEmail": "grace@work.example"})).unwrap();
+    a.prefs.active_profile = "Work".into();
+    assert_eq!(a.my_identity(), Some(("Grace".to_string(), "grace@work.example".to_string())));
+}

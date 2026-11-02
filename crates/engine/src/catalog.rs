@@ -210,6 +210,7 @@ pub const UI_COMMANDS: &[&str] = &[
     "ui.autoFetch",
     "ui.workspaces",
     "ui.profile",
+    "ui.person",
     "ui.treeView",
     "ui.learn",
 ];

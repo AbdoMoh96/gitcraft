@@ -5,7 +5,7 @@
 | Number | Value |
 |---|---|
 | Feature parity | 173 / 173 (100%) |
-| Commands | 158 engine + 29 UI |
+| Commands | 158 engine + 30 UI |
 | Tests | 115 (`cargo xtask stats`) |
 | Lines of Rust | ~23,200 |
 
@@ -13,6 +13,13 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-11-02 — People.** A person page (`ui.person`) opens in the center from the author's name
+  or picture in the commit panel, a commit's right-click menu, or the palette (Your Nickname and
+  Picture, for you): give anyone, you included, a nickname shown in the graph, its hover card and the
+  commit panel, and a picture: their Gravatar (the default), their initials, one of 40 built-in cats
+  (`assets/cats`), or an uploaded image (cropped square, kept in `<settings>/pictures`). Kept in
+  preferences by e-mail, so it applies in every repository; Restore Defaults forgets them. Nothing
+  is written to git.
 - **2026-10-28 — M6.** Hosting through GitHub's `gh` and GitLab's `glab` (they keep the sign-in;
   GitCraft never sees a token): Pull Requests, Issues and CI sections in the left panel (`pr.list`,
   `issues.list`, `ci.list`; open, check out a pull request, branch for an issue), Create Pull Request

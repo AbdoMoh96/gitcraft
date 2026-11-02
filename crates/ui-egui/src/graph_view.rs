@@ -876,7 +876,11 @@ fn person_card(ui: &mut egui::Ui, avatars: &Avatars, c: &Commit) {
         avatars.paint_or_initials(ui.painter(), r.center(), 32.0, &c.author.email, &c.author.name, Color32::WHITE);
         ui.vertical(|ui| {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(&c.author.name).strong().size(14.0));
+            let shown = avatars.display_name(&c.author.email, &c.author.name);
+            ui.label(egui::RichText::new(shown).strong().size(14.0));
+            if shown != c.author.name {
+                ui.label(egui::RichText::new(&c.author.name).small().color(t.dim));
+            }
             ui.label(egui::RichText::new(&c.author.email).small().color(t.dim));
             ui.label(egui::RichText::new(util::date_time(c.author.time)).small().color(t.dim));
         });
@@ -886,7 +890,8 @@ fn person_card(ui: &mut egui::Ui, avatars: &Avatars, c: &Commit) {
 fn author_cell(p: &egui::Painter, avatars: &Avatars, r: Rect, c: &Commit, fade: &dyn Fn(Color32) -> Color32, t: Tokens) {
     let center = pos2(r.left() + 14.0, r.center().y);
     avatars.paint_or_initials(p, center, 8.0, &c.author.email, &c.author.name, fade(Color32::WHITE));
-    text_in(p, Rect::from_min_max(pos2(r.left() + 20.0, r.top()), r.max), &c.author.name, FontId::proportional(12.0), fade(t.text));
+    let shown = avatars.display_name(&c.author.email, &c.author.name);
+    text_in(p, Rect::from_min_max(pos2(r.left() + 20.0, r.top()), r.max), shown, FontId::proportional(12.0), fade(t.text));
 }
 
 /// The row's labels: the first as a pill (with local / remote / tag marks), the rest counted.
@@ -1108,6 +1113,11 @@ fn commit_menu(app: &GitApp, ui: &mut egui::Ui, c: &Commit, actions: &mut Vec<Ac
     }
     if ui.button("Copy Commit Message").clicked() {
         actions.push(Action::Copy(c.message()));
+        ui.close();
+    }
+    ui.separator();
+    if ui.button(format!("{}: Nickname and Picture…", app.avatars.display_name(&c.author.email, &c.author.name))).clicked() {
+        actions.push(Action::Run("ui.person", json!({"email": c.author.email, "name": c.author.name})));
         ui.close();
     }
 }

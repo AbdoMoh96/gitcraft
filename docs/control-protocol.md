@@ -27,6 +27,7 @@ key file, or `GITCRAFT_CONTROL_KEY`, and sends it only to loopback addresses.
 | `engine.commands` | | every command (id, label, location, shortcut, params, mutates, slow) |
 | `repo.inspect` | | branch, head, upstream, ahead/behind, state, staged/unstaged/conflicted files, branches, tags, stashes, remotes, selection, draft, undo/redo |
 | `ui.parity` | | feature parity |
+| `ui.person` | `{"action"?: "open" \| "set" \| "reset" \| "list" \| "close", "email"?, "name"?, "nickname"?, "picture"?: "default" \| "initials" \| "cat:1"…"cat:40", "image"?: path}` | someone's page (default: you); `set` changes their nickname, picture, or imports `image`; `reset` restores their name and Gravatar |
 | `ui.screenshot` | | `{"png": base64, "width", "height"}` of the window |
 | `ui.state` | | open dialog, palette, background jobs, status line, theme, recent repositories |
 | `ui.dialog` | `{"name": "branch.create" \| "tag.create" \| "repo.clone" \| …}` | opens a dialog |

@@ -32,6 +32,7 @@ impl GitApp {
         }
         let text = String::from_utf8(bytes).map_err(|_| "the file isn't UTF-8 text: open it in an editor".to_string())?;
         self.editor = Some(Editor { path: path.to_string(), saved: text.clone(), text, rev: None });
+        self.person = None;
         Ok(())
     }
 
@@ -43,6 +44,7 @@ impl GitApp {
         }
         let text = v["text"].as_str().unwrap_or("").to_string();
         self.editor = Some(Editor { path: path.to_string(), saved: text.clone(), text, rev: Some(rev.to_string()) });
+        self.person = None;
         Ok(())
     }
 }
