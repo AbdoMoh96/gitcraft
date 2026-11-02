@@ -6,6 +6,7 @@
 //! work in progress), runs the commands in order (`ui.*` ones too, e.g.
 //! `--cmd 'ui.dialog={"name":"branch.create"}'`), renders with wgpu and writes the PNG.
 //! `--diverge` checks out `fix/typo` with a change that would conflict with `main`.
+//! `--hover X,Y` rests the pointer there before the shot (hover cards, tooltips).
 //! `--conflict` stops in a merge with a conflict in `src/main.rs` instead of the work in progress.
 
 use gitcraft_engine::Session;
@@ -105,6 +106,12 @@ fn main() -> Result<(), String> {
             eprintln!("{id}: {e}");
         }
         harness.run_steps(3);
+    }
+    if let Some((x, y)) = args.windows(2).find(|w| w[0] == "--hover").and_then(|w| w[1].split_once(',')) {
+        let at = egui::pos2(x.trim().parse().map_err(|_| "--hover X,Y")?, y.trim().parse().map_err(|_| "--hover X,Y")?);
+        harness.event(egui::Event::PointerMoved(at));
+        // Past the tooltip delay and the hover card's animation.
+        harness.run_steps(90);
     }
     let img = harness.render()?;
     img.save(&out).map_err(|e| e.to_string())?;

@@ -642,10 +642,16 @@ fn details(app: &mut GitApp, ui: &mut egui::Ui, oid: &str) {
         ui.horizontal(|ui| {
             let name = s(&c["author"]["name"]);
             let email = s(&c["author"]["email"]);
-            // The picture and the name open the person's page (nickname, picture).
-            let (r, pic) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
-            app.avatars.paint_or_initials(ui.painter(), r.center(), 14.0, &email, &name, Color32::WHITE);
-            if pic.on_hover_text("Nickname and picture…").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            // The picture and the name open the person's page (nickname, picture); hovering the
+            // picture grows a card with a larger one and their full name.
+            let (r, pic) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::click());
+            app.avatars.paint_or_initials(ui.painter(), r.center(), 21.0, &email, &name, Color32::WHITE);
+            let grow = crate::people::card_growth(ui.ctx(), pic.id, pic.hovered());
+            let when = format!("authored {}", util::date_time(c["author"]["time"].as_i64().unwrap_or(0)));
+            let pic = pic.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_ui_at_pointer(|ui| {
+                crate::people::hover_card(ui, &app.avatars, &email, &name, Some(&when), Some("Click for nickname and picture"), grow);
+            });
+            if pic.clicked() {
                 crate::people::open(app, &email, &name);
             }
             ui.vertical(|ui| {

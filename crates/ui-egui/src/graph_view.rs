@@ -398,8 +398,9 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             {
                 actions.push(t.action());
             }
+            let grow = crate::people::card_growth(ui.ctx(), egui::Id::new(("graph node", &commit.oid)), over_node && resp.hovered());
             let resp = if over_node {
-                resp.on_hover_ui_at_pointer(|ui| person_card(ui, &app.avatars, commit))
+                resp.on_hover_ui_at_pointer(|ui| person_card(ui, &app.avatars, commit, grow))
             } else {
                 resp.on_hover_text_at_pointer(format!(
                     "{}\n{} <{}>\n{}",
@@ -869,22 +870,9 @@ fn node(p: &egui::Painter, avatars: &Avatars, c: Pos2, commit: &Commit, color: C
 }
 
 /// The hover card over a commit's dot: the author's picture, name and address.
-fn person_card(ui: &mut egui::Ui, avatars: &Avatars, c: &Commit) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        let (r, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
-        avatars.paint_or_initials(ui.painter(), r.center(), 32.0, &c.author.email, &c.author.name, Color32::WHITE);
-        ui.vertical(|ui| {
-            ui.add_space(8.0);
-            let shown = avatars.display_name(&c.author.email, &c.author.name);
-            ui.label(egui::RichText::new(shown).strong().size(14.0));
-            if shown != c.author.name {
-                ui.label(egui::RichText::new(&c.author.name).small().color(t.dim));
-            }
-            ui.label(egui::RichText::new(&c.author.email).small().color(t.dim));
-            ui.label(egui::RichText::new(util::date_time(c.author.time)).small().color(t.dim));
-        });
-    });
+fn person_card(ui: &mut egui::Ui, avatars: &Avatars, c: &Commit, grow: f32) {
+    let when = util::date_time(c.author.time);
+    crate::people::hover_card(ui, avatars, &c.author.email, &c.author.name, Some(&when), None, grow);
 }
 
 fn author_cell(p: &egui::Painter, avatars: &Avatars, r: Rect, c: &Commit, fade: &dyn Fn(Color32) -> Color32, t: Tokens) {

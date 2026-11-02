@@ -449,6 +449,48 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
     }
 }
 
+/// How long the hover card takes to grow in, in seconds.
+const CARD_GROW_S: f32 = 0.18;
+
+/// How far the hover card for `id` has grown in (0 to 1): call every frame with whether its
+/// target is hovered, so it starts small again each time the pointer comes back.
+pub fn card_growth(ctx: &egui::Context, id: egui::Id, hovered: bool) -> f32 {
+    ctx.animate_bool_with_time(id.with("person card"), hovered, CARD_GROW_S)
+}
+
+/// The card shown under the pointer over someone's picture: a large picture growing in, their
+/// nickname and full name, address and `when` (a date line). `grow` is from [`card_growth`].
+pub fn hover_card(ui: &mut egui::Ui, avatars: &crate::avatars::Avatars, email: &str, name: &str, when: Option<&str>, hint: Option<&str>, grow: f32) {
+    let t = Tokens::get(ui.ctx());
+    let k = grow.clamp(0.0, 1.0);
+    // Ease out: fast at first, settling at full size.
+    let e = 1.0 - (1.0 - k) * (1.0 - k);
+    ui.set_opacity(0.35 + 0.65 * e);
+    ui.horizontal(|ui| {
+        // A fixed box so the card itself doesn't change size while the picture grows.
+        let full = 48.0;
+        let (r, _) = ui.allocate_exact_size(vec2(full * 2.0, full * 2.0), Sense::hover());
+        avatars.paint_or_initials(ui.painter(), r.center(), full * (0.55 + 0.45 * e), email, name, Color32::WHITE);
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.add_space(10.0);
+            let shown = avatars.display_name(email, name);
+            ui.label(RichText::new(if shown.is_empty() { email } else { shown }).strong().size(16.0));
+            if shown != name && !name.is_empty() {
+                ui.label(RichText::new(name).color(t.text));
+            }
+            ui.label(RichText::new(email).small().color(t.dim));
+            if let Some(w) = when {
+                ui.label(RichText::new(w).small().color(t.dim));
+            }
+            if let Some(h) = hint {
+                ui.add_space(2.0);
+                ui.label(RichText::new(h).small().color(t.accent));
+            }
+        });
+    });
+}
+
 /// A name that opens `email`'s page when clicked.
 pub fn clickable_name(app: &mut GitApp, ui: &mut egui::Ui, email: &str, name: &str, text: RichText) -> bool {
     let r =
