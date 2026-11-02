@@ -590,7 +590,8 @@ fn commit_form(app: &mut GitApp, ui: &mut egui::Ui, staged: usize, run: &mut Opt
         .min_size(vec2(ui.available_width(), 32.0));
     let r = ui.add_enabled(can, b);
     if committing {
-        let c = pos2(r.rect.left() + 18.0, r.rect.center().y);
+        // At the right end: the label starts at the left.
+        let c = pos2(r.rect.right() - 18.0, r.rect.center().y);
         egui::Spinner::new().size(14.0).color(Color32::WHITE).paint_at(ui, egui::Rect::from_center_size(c, vec2(14.0, 14.0)));
         r.on_disabled_hover_text("Waiting for the commit and its hooks to finish");
     } else if r.on_hover_text(util::shortcut_label("Mod+Enter")).clicked() {
