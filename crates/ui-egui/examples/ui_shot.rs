@@ -7,6 +7,7 @@
 //! `--cmd 'ui.dialog={"name":"branch.create"}'`), renders with wgpu and writes the PNG.
 //! `--diverge` checks out `fix/typo` with a change that would conflict with `main`.
 //! `--hover X,Y` rests the pointer there before the shot (hover cards, tooltips).
+//! `--recent` fills the recent and most used repositories with made-up folders.
 //! `--conflict` stops in a merge with a conflict in `src/main.rs` instead of the work in progress.
 
 use gitcraft_engine::Session;
@@ -78,7 +79,17 @@ fn main() -> Result<(), String> {
 
     let mut session = Session::new(repo.git().clone());
     session.set_repo(repo).map_err(|e| e.to_string())?;
-    let prefs = Prefs { appearance: if dark { Appearance::Dark } else { Appearance::Light }, ..Prefs::default() };
+    let mut prefs = Prefs { appearance: if dark { Appearance::Dark } else { Appearance::Light }, ..Prefs::default() };
+    if args.iter().any(|a| a == "--recent") {
+        // Made-up repositories opened a few times each, for the start screen's most used tiles.
+        let names =
+            ["gitcraft", "website", "dotfiles", "api-server", "mobile-app", "design-system", "infra", "notes", "cli-tools", "playground", "old-blog"];
+        for (i, n) in names.iter().enumerate() {
+            for _ in 0..(names.len() - i) {
+                prefs.add_recent(std::path::Path::new(&format!("/home/me/code/{n}")));
+            }
+        }
+    }
     let mut app = GitApp::new(session, prefs, Services::default());
     app.session.draft.summary = "Greet GitCraft by name".into();
     let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(w, h)).wgpu().build_ui_state(

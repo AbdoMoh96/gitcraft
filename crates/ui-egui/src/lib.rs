@@ -62,6 +62,8 @@ pub struct Prefs {
     pub appearance: Appearance,
     /// Repositories opened, newest first.
     pub recent: Vec<String>,
+    /// How many times each repository was opened, by folder (the start screen's most used).
+    pub repo_opens: std::collections::BTreeMap<String, u32>,
     /// Open the last repository at start.
     pub reopen_last: bool,
     pub context_lines: u32,
@@ -127,6 +129,7 @@ impl Default for Prefs {
         Prefs {
             appearance: Appearance::System,
             recent: Vec::new(),
+            repo_opens: Default::default(),
             reopen_last: true,
             context_lines: 3,
             commit_limit: 2000,
@@ -153,6 +156,10 @@ impl Default for Prefs {
 
 /// Recent repositories kept.
 pub const MAX_RECENT: usize = 12;
+/// Repositories whose open counts are kept (the least opened are forgotten first).
+pub const MAX_REPO_OPENS: usize = 500;
+/// Repositories shown on the start screen's most used tiles.
+pub const MOST_USED: usize = 10;
 
 impl Prefs {
     pub fn from_json(bytes: &[u8]) -> Option<Prefs> {
@@ -161,8 +168,39 @@ impl Prefs {
     pub fn add_recent(&mut self, path: &Path) {
         let p = path.display().to_string();
         self.recent.retain(|r| *r != p);
-        self.recent.insert(0, p);
+        self.recent.insert(0, p.clone());
         self.recent.truncate(MAX_RECENT);
+        let n = self.repo_opens.entry(p.clone()).or_insert(0);
+        *n = n.saturating_add(1);
+        while self.repo_opens.len() > MAX_REPO_OPENS {
+            // Forget the least opened one (never the one just opened).
+            let least = self.repo_opens.iter().filter(|(k, _)| **k != p).min_by_key(|(_, n)| **n).map(|(k, _)| k.clone());
+            match least {
+                Some(k) => self.repo_opens.remove(&k),
+                None => break,
+            };
+        }
+    }
+
+    /// Forget a repository in the recent list and the open counts.
+    pub fn forget_repo(&mut self, path: &str) {
+        self.recent.retain(|r| r != path);
+        self.repo_opens.remove(path);
+    }
+
+    /// The `n` most opened repositories with their open counts, most first; ties go to the most
+    /// recent. Recent repositories without a count (from before counts were kept) come last.
+    pub fn most_used(&self, n: usize) -> Vec<(String, u32)> {
+        let mut all: Vec<(String, u32)> = self.repo_opens.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        for r in &self.recent {
+            if !self.repo_opens.contains_key(r) {
+                all.push((r.clone(), 0));
+            }
+        }
+        let rank = |p: &str| self.recent.iter().position(|r| r == p).unwrap_or(usize::MAX);
+        all.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| rank(&a.0).cmp(&rank(&b.0))).then_with(|| a.0.cmp(&b.0)));
+        all.truncate(n);
+        all
     }
 }
 
@@ -1083,7 +1121,8 @@ impl GitApp {
         toolbar::show(self, ui);
         toolbar::status_bar(self, ui);
         if self.session.repo.is_none() {
-            egui::CentralPanel::default().show(ui, |ui| start::show(self, ui));
+            egui::CentralPanel::default()
+                .show(ui, |ui| egui::ScrollArea::vertical().id_salt("start").auto_shrink([false, false]).show(ui, |ui| start::show(self, ui)));
         } else {
             if self.terminal_open {
                 terminal::show(self, ui);

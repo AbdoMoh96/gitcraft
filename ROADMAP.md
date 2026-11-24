@@ -13,6 +13,13 @@ Milestones and the current focus: [`docs/roadmap.md`](docs/roadmap.md). Ranked w
 [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+- **2026-11-24 — Tabs and start screen.** No limit on open tabs: past their narrowest the strip
+  scrolls sideways (wheel or trackpad) and keeps the shown tab in view. The open tabs are written to
+  the preferences every two seconds when they change (not only on a clean quit), reopen in the same
+  order at start, and also when GitCraft starts with a folder (it opens after them); `--sample`
+  leaves the saved tabs alone. The start screen (every new tab) shows the ten most opened
+  repositories as tiles (`Prefs::repo_opens`, open counts kept for 500 folders), and scrolls. Radar
+  plays an animated radar (`assets/radar.gif`) while it loads.
 - **2026-11-02 — People.** A person page (`ui.person`) opens in the center from the author's name
   or picture in the commit panel, a commit's right-click menu, or the palette (Your Nickname and
   Picture, for you): give anyone, you included, a nickname shown in the graph, its hover card and the

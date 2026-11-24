@@ -37,6 +37,34 @@ fn prefs_round_trip_and_recent() {
     assert_eq!(Prefs::from_json(br#"{"future": 1}"#).unwrap(), Prefs::default());
 }
 
+#[test]
+fn most_used_counts_opens() {
+    // From before counts were kept: recent only.
+    let mut p = Prefs { recent: vec!["/old/a".into(), "/old/b".into()], ..Prefs::default() };
+    for (path, n) in [("/r/x", 3), ("/r/y", 5), ("/r/z", 3)] {
+        for _ in 0..n {
+            p.add_recent(std::path::Path::new(path));
+        }
+    }
+    // Ties go to the most recent (z was opened after x), counted ones before uncounted.
+    let used = p.most_used(10);
+    let names: Vec<&str> = used.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(names, ["/r/y", "/r/z", "/r/x", "/old/a", "/old/b"]);
+    assert_eq!(p.most_used(10)[0].1, 5);
+    assert_eq!(p.most_used(2).len(), 2);
+    p.forget_repo("/r/y");
+    assert_eq!(p.most_used(1)[0].0, "/r/z");
+    assert!(!p.recent.contains(&"/r/y".to_string()));
+    // The counts are capped, keeping the one just opened.
+    for i in 0..(crate::MAX_REPO_OPENS + 20) {
+        p.add_recent(std::path::Path::new(&format!("/many/{i}")));
+    }
+    assert_eq!(p.repo_opens.len(), crate::MAX_REPO_OPENS);
+    assert!(p.repo_opens.contains_key(&format!("/many/{}", crate::MAX_REPO_OPENS + 19)));
+    let back = Prefs::from_json(&serde_json::to_vec(&p).unwrap()).unwrap();
+    assert_eq!(back, p);
+}
+
 /// Run frames until the background jobs are done.
 fn finish_jobs(a: &mut GitApp) {
     let ctx = egui::Context::default();

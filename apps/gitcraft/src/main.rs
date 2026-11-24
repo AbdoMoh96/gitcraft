@@ -40,11 +40,47 @@ struct App {
     key_file: Option<control_server::KeyFile>,
     /// `--sample`: the throwaway repository, removed on exit.
     _sample: Option<gitcraft_git::testing::TempDir>,
+    /// The preferences as last written, to save again only when they change.
+    saved: Prefs,
+    /// When they were last compared (seconds, egui's clock).
+    last_check: f64,
+    /// `--sample`: the tabs from the settings, written back instead of the sample's.
+    keep_tabs: Option<(Vec<String>, usize)>,
+}
+
+/// How often changed preferences are written while running (seconds), so open tabs survive a
+/// crash or a killed process, not only a clean quit.
+const SAVE_EVERY: f64 = 2.0;
+
+impl App {
+    fn prefs_to_save(&self) -> Prefs {
+        let mut p = self.app.prefs.clone();
+        if let Some((tabs, active)) = &self.keep_tabs {
+            p.tabs = tabs.clone();
+            p.active_tab = *active;
+        }
+        p
+    }
+
+    fn save_if_changed(&mut self) {
+        let p = self.prefs_to_save();
+        if p != self.saved {
+            save_prefs(&p);
+            self.saved = p;
+        }
+    }
 }
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.app.logic(ctx);
+        let now = ctx.input(|i| i.time);
+        if now - self.last_check >= SAVE_EVERY || now < self.last_check {
+            self.last_check = now;
+            self.save_if_changed();
+        }
+        // Come back to write a change made just after the last check, even when idle.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(SAVE_EVERY));
         if self.app.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -53,7 +89,7 @@ impl eframe::App for App {
         self.app.ui(ui);
     }
     fn on_exit(&mut self) {
-        save_prefs(&self.app.prefs);
+        save_prefs(&self.prefs_to_save());
         if let Some(k) = &self.key_file {
             k.remove();
         }
@@ -156,6 +192,7 @@ fn main() -> std::process::ExitCode {
     let mut prefs = load_prefs();
     let mut keep_sample = None;
     let mut restore_tabs = false;
+    let mut open_after: Option<PathBuf> = None;
     let mut session = Session::default();
     if sample {
         match gitcraft_git::testing::sample("app") {
@@ -169,7 +206,11 @@ fn main() -> std::process::ExitCode {
             Err(e) => log::error!("sample: {e}"),
         }
     } else if let Some(f) = &folder {
-        if let Err(e) = session.open(f) {
+        if prefs.reopen_last && !prefs.tabs.is_empty() {
+            // Reopen the last run's tabs, then open the folder in a tab of its own (after them).
+            restore_tabs = true;
+            open_after = Some(f.clone());
+        } else if let Err(e) = session.open(f) {
             eprintln!("gitcraft: {e}");
         }
     } else if prefs.reopen_last && !prefs.tabs.is_empty() {
@@ -210,11 +251,18 @@ fn main() -> std::process::ExitCode {
                 })),
                 pictures: gitcraft_control_key::settings_dir().map(|d| gitcraft_ui_egui::people::pictures_dir(&d)),
             };
+            let keep_tabs = keep_sample.is_some().then(|| (prefs.tabs.clone(), prefs.active_tab));
+            let saved = prefs.clone();
             let mut app = GitApp::new(session, prefs, services);
             // The last run's tabs (the first one is open already).
             if restore_tabs {
                 let (tabs, active) = (app.prefs.tabs.clone(), app.prefs.active_tab);
                 app.restore_tabs(&tabs, active);
+            }
+            if let Some(f) = &open_after
+                && let Err(e) = app.open_repo(f)
+            {
+                eprintln!("gitcraft: {e}");
             }
             let mut key_file = None;
             if let Some(port) = port {
@@ -224,7 +272,7 @@ fn main() -> std::process::ExitCode {
                     key_file = kf;
                 }
             }
-            Ok(Box::new(App { app, key_file, _sample: keep_sample }))
+            Ok(Box::new(App { app, key_file, _sample: keep_sample, saved, last_check: 0.0, keep_tabs }))
         }),
     );
     match result {

@@ -1,6 +1,6 @@
 //! The start screen, when no repository is open: open, clone or create one, or pick a recent one.
 
-use egui::{Color32, FontId, RichText, vec2};
+use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::icons::{self, Icon};
@@ -50,6 +50,7 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_space(26.0);
+        most_used(app, ui);
         if !app.prefs.favorites.is_empty() {
             ui.label(RichText::new("FAVOURITES").small().strong().color(t.dim));
             ui.add_space(4.0);
@@ -95,5 +96,73 @@ pub fn show(app: &mut GitApp, ui: &mut egui::Ui) {
                 .small()
                 .color(t.dim),
         );
+    });
+}
+
+/// Side of a most used tile, the gap between tiles, and tiles per row.
+const TILE: f32 = 112.0;
+const TILE_GAP: f32 = 12.0;
+const TILES_PER_ROW: usize = 5;
+
+/// The most opened repositories as clickable squares, five to a row.
+fn most_used(app: &mut GitApp, ui: &mut egui::Ui) {
+    let repos = app.prefs.most_used(crate::MOST_USED);
+    if repos.is_empty() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.label(RichText::new("MOST USED").small().strong().color(t.dim));
+    ui.add_space(6.0);
+    for row in repos.chunks(TILES_PER_ROW) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let w = row.len() as f32 * TILE + row.len().saturating_sub(1) as f32 * TILE_GAP;
+            ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+            for (i, (path, opens)) in row.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(TILE_GAP);
+                }
+                tile(app, ui, path, *opens);
+            }
+        });
+        ui.add_space(TILE_GAP);
+    }
+    ui.add_space(14.0);
+}
+
+fn tile(app: &mut GitApp, ui: &mut egui::Ui, path: &str, opens: u32) {
+    let t = Tokens::get(ui.ctx());
+    let p = std::path::Path::new(path);
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
+    let parent = p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (rect, resp) = ui.allocate_exact_size(vec2(TILE, TILE), Sense::click());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 10.0, if resp.hovered() { t.hover } else { t.panel });
+    painter.rect_stroke(rect, 10.0, Stroke::new(1.0, if resp.hovered() { t.accent } else { t.border }), egui::StrokeKind::Inside);
+    // A badge with the name's first letter, coloured from the name so each repository keeps its colour.
+    let hue = name.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(usize::from(b)));
+    let badge = Rect::from_center_size(pos2(rect.center().x, rect.top() + 34.0), vec2(44.0, 44.0));
+    painter.rect_filled(badge, 10.0, crate::theme::lane_color(hue));
+    let initial: String = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+    painter.text(badge.center(), Align2::CENTER_CENTER, initial, FontId::proportional(22.0), Color32::WHITE);
+    let text = rect.shrink2(vec2(8.0, 0.0));
+    let clip = painter.with_clip_rect(text);
+    clip.text(pos2(text.center().x, rect.top() + 72.0), Align2::CENTER_CENTER, &name, FontId::proportional(13.0), t.text);
+    clip.text(pos2(text.center().x, rect.top() + 90.0), Align2::CENTER_CENTER, &parent, FontId::proportional(11.0), t.dim);
+    let times = if opens == 1 { "once".to_string() } else { format!("{opens} times") };
+    let resp = resp.on_hover_text(if opens == 0 { path.to_string() } else { format!("{path}\nOpened {times}") });
+    if resp.clicked() {
+        let _ = app.open_repo(p);
+    }
+    resp.context_menu(|ui| {
+        let fav = app.prefs.favorites.iter().any(|f| f == path);
+        if ui.button(if fav { "Remove from Favourites" } else { "Add to Favourites" }).clicked() {
+            app.toggle_favorite(path);
+            ui.close();
+        }
+        if ui.button("Forget This Repository").on_hover_text("Removes it from the recent and most used lists; nothing on disk changes").clicked() {
+            app.prefs.forget_repo(path);
+            ui.close();
+        }
     });
 }
