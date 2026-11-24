@@ -17,6 +17,7 @@ pub mod graph_view;
 pub mod highlight;
 pub mod hosting_ui;
 pub mod icons;
+pub mod loading;
 pub mod merge_tool;
 pub mod palette;
 pub mod people;

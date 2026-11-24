@@ -293,11 +293,13 @@ pub(crate) fn launchpad_body(app: &mut GitApp, ui: &mut egui::Ui) -> Close {
     );
     ui.add_space(6.0);
     if app.busy("launchpad.open") {
-        ui.add(egui::Spinner::new());
+        ui.vertical_centered(|ui| crate::loading::show(ui, "radar", crate::loading::RADAR_GIF, 380.0));
     } else if ui.button("Refresh").clicked() {
         let _ = app.run("launchpad.open", json!({}));
     }
-    if let Some(v) = app.hosting.get("launchpad.open").cloned() {
+    if app.busy("launchpad.open") {
+        // Radar's loading picture stands in for the lists until the answer comes back.
+    } else if let Some(v) = app.hosting.get("launchpad.open").cloned() {
         egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
             item_list(app, ui, "Waiting for your review", v["reviewRequests"].as_array().map(Vec::as_slice).unwrap_or(&[]));
             item_list(app, ui, "Your pull requests", v["myPullRequests"].as_array().map(Vec::as_slice).unwrap_or(&[]));

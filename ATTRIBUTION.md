@@ -12,6 +12,7 @@ open licences.
 | File | Author | Source | Licence |
 |---|---|---|---|
 | `assets/gitcraft.png` (application and window icon) | GitCraft contributors | Original artwork made for this project | MIT OR Apache-2.0 |
+| `assets/radar.gif` (Radar loading animation) | Added by the project maintainer | **To confirm** | **To confirm** |
 | `assets/cats/1.png` (built-in profile picture, person page) | Added by the project maintainer (commit e465a3e) | **To confirm** | **To confirm** |
 | `assets/cats/2.png` (built-in profile picture, person page) | Added by the project maintainer (commit e465a3e) | **To confirm** | **To confirm** |
 | `assets/cats/3.png` (built-in profile picture, person page) | Added by the project maintainer (commit e465a3e) | **To confirm** | **To confirm** |
