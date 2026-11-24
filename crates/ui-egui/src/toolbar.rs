@@ -273,8 +273,9 @@ fn repo_menu(app: &mut GitApp, ui: &mut egui::Ui) {
             app.dialog = Dialog::named("ssh.keys", &app.session, &json!({}));
             ui.close();
         }
-        if ui.button("Preferences…").clicked() {
-            app.dialog = Some(Dialog::Preferences);
+        if ui.button("Preferences").clicked() {
+            app.dialog = None;
+            app.prefs_page = Some(crate::prefs_page::Section::General);
             ui.close();
         }
         if ui.button("Keyboard Shortcuts").clicked() {

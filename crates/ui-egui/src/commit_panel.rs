@@ -309,8 +309,17 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
         });
     }
     ui.add_space(4.0);
+    // The commit message and button sit at the bottom of the panel; the two file lists share
+    // the height above them.
+    let staged_count = st.staged().count();
+    egui::Panel::bottom("commit_form_area")
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(Frame::NONE.inner_margin(Margin { left: 0, right: 0, top: 4, bottom: 0 }))
+        .show(ui, |ui| commit_form(app, ui, staged_count, &mut run));
+    // Two section headers (about 24 px each), the gap between the lists and their frames.
     let avail = ui.available_height();
-    let list_h = ((avail - 250.0) / 2.0).max(70.0);
+    let list_h = ((avail - 2.0 * 24.0 - 6.0 - 8.0) / 2.0).max(60.0);
     let sel_file = app.session.sel.file.clone();
 
     let mut unstaged: Vec<FileStatus> = st.unstaged().cloned().collect();
@@ -321,7 +330,7 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
         run = Some(("stage.all", json!({})));
     }
     Frame::NONE.fill(t.bg).corner_radius(4).inner_margin(2).show(ui, |ui| {
-        egui::ScrollArea::vertical().id_salt("unstaged").max_height(list_h).min_scrolled_height(list_h).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("unstaged").max_height(list_h).min_scrolled_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             if unstaged.is_empty() {
                 ui.label(RichText::new("No unstaged changes").small().weak());
             }
@@ -451,7 +460,7 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
         run = Some(("unstage.all", json!({})));
     }
     Frame::NONE.fill(t.bg).corner_radius(4).inner_margin(2).show(ui, |ui| {
-        egui::ScrollArea::vertical().id_salt("staged").max_height(list_h).min_scrolled_height(list_h).auto_shrink([false, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("staged").max_height(list_h).min_scrolled_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             if staged.is_empty() {
                 ui.label(RichText::new("Stage files to commit them").small().weak());
             }
@@ -496,8 +505,6 @@ fn wip(app: &mut GitApp, ui: &mut egui::Ui) {
             }
         });
     });
-    ui.add_space(8.0);
-    commit_form(app, ui, staged.len(), &mut run);
     if let Some(d) = dialog {
         app.dialog = Some(d);
     }

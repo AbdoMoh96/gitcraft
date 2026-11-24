@@ -222,13 +222,24 @@ fn every_view_lays_out() {
         "team.overlap",
         "commit.explain",
         "shortcuts",
-        "preferences",
     ] {
         a.ui_command("ui.dialog", &json!({"name": name})).unwrap();
         frame(&mut a);
         assert!(a.dialog.is_some(), "{name}");
         a.dialog = None;
     }
+    // Preferences open as a page (the old dialog name still works).
+    a.ui_command("ui.dialog", &json!({"name": "preferences"})).unwrap();
+    frame(&mut a);
+    assert!(a.dialog.is_none() && a.prefs_page.is_some());
+    for s in crate::prefs_page::Section::GLOBAL.into_iter().chain(crate::prefs_page::Section::REPO) {
+        a.ui_command("ui.preferences", &json!({"section": s.code()})).unwrap();
+        frame(&mut a);
+        assert_eq!(a.prefs_page, Some(s));
+    }
+    crate::prefs_page::close(&mut a);
+    frame(&mut a);
+    assert!(a.prefs_page.is_none());
     a.ui_command("ui.commandPalette", &json!({})).unwrap();
     frame(&mut a);
     assert!(a.palette.is_some());

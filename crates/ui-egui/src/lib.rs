@@ -20,6 +20,7 @@ pub mod icons;
 pub mod merge_tool;
 pub mod palette;
 pub mod people;
+pub mod prefs_page;
 pub mod refs_panel;
 pub mod start;
 pub mod tabs;
@@ -251,6 +252,8 @@ pub struct GitApp {
     pub terminal_open: bool,
     /// The side panels are hidden: the graph takes the window (their state is kept).
     pub graph_only: bool,
+    /// Preferences fill the window (the section shown); `None`: the repository view.
+    pub prefs_page: Option<prefs_page::Section>,
     /// The terminal had the keyboard last frame: app shortcuts stay out of its way.
     pub terminal_focused: bool,
     /// Give the terminal the keyboard on the next frame (it was just opened).
@@ -349,6 +352,7 @@ impl GitApp {
             terminal: None,
             terminal_open: false,
             graph_only: false,
+            prefs_page: None,
             terminal_focused: false,
             terminal_focus_request: false,
             pending_terminal_input: None,
@@ -688,7 +692,8 @@ impl GitApp {
                 Ok(json!({}))
             }
             "ui.preferences" => {
-                self.dialog = Some(Dialog::Preferences);
+                self.dialog = None;
+                self.prefs_page = Some(s("section").and_then(prefs_page::Section::parse).unwrap_or(prefs_page::Section::General));
                 Ok(json!({}))
             }
             "ui.graphOnly" => {
@@ -859,6 +864,9 @@ impl GitApp {
             }
             "ui.dialog" => {
                 let name = s("name").ok_or("`name` is required")?;
+                if name == "preferences" || name == "ui.preferences" {
+                    return self.ui_command("ui.preferences", v);
+                }
                 self.dialog = Some(Dialog::named(name, &self.session, v).ok_or_else(|| format!("no dialog `{name}`"))?);
                 Ok(json!({"open": name}))
             }
@@ -873,6 +881,7 @@ impl GitApp {
             }
             "ui.state" => Ok(json!({
                 "dialog": self.dialog.as_ref().map(Dialog::name),
+                "preferences": self.prefs_page.map(prefs_page::Section::code),
                 "palette": self.palette.is_some(),
                 "jobs": self.jobs.iter().map(|j| j.id).collect::<Vec<_>>(),
                 "status": self.toast.as_ref().map(|t| json!({"text": t.text, "error": t.error})),
@@ -1057,6 +1066,19 @@ impl GitApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         tabs::show(self, ui);
+        if self.prefs_page.is_some() {
+            toolbar::status_bar(self, ui);
+            prefs_page::show(self, ui);
+        } else {
+            self.repo_view(ui, &ctx);
+        }
+        dialogs::show(self, &ctx);
+        palette::show(self, &ctx);
+        self.toasts.show(&ctx, 24.0);
+    }
+
+    /// The toolbar, the side panels and the center (the window without Preferences).
+    fn repo_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         toolbar::show(self, ui);
         toolbar::status_bar(self, ui);
         if self.session.repo.is_none() {
@@ -1074,7 +1096,7 @@ impl GitApp {
             if !self.graph_only {
                 commit_panel::show(self, ui);
             }
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(&ctx).bg)).show(ui, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(theme::Tokens::get(ctx).bg)).show(ui, |ui| {
                 if self.person.is_some() {
                     people::show(self, ui);
                 } else if self.editor.is_some() {
@@ -1089,9 +1111,6 @@ impl GitApp {
                 }
             });
         }
-        dialogs::show(self, &ctx);
-        palette::show(self, &ctx);
-        self.toasts.show(&ctx, 24.0);
     }
 
     /// The file open in the center when it's in conflict (it opens in the merge tool).

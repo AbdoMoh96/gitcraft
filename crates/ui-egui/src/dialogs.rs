@@ -8,7 +8,7 @@ use gitcraft_engine::git::TodoAction;
 use gitcraft_engine::{Selected, Session};
 use serde_json::{Value, json};
 
-use crate::theme::{Appearance, Tokens};
+use crate::theme::Tokens;
 use crate::{GitApp, util};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -185,7 +185,6 @@ pub enum Dialog {
         custom: String,
     },
     Shortcuts,
-    Preferences,
 }
 
 /// The Learn Git lessons: a title, how to do it in GitCraft, and the commands that complete it.
@@ -374,7 +373,6 @@ impl Dialog {
                 Dialog::CoAuthors { known, chosen: s.draft.co_authors.clone(), custom: String::new() }
             }
             "shortcuts" | "ui.shortcuts" => Dialog::Shortcuts,
-            "preferences" | "ui.preferences" => Dialog::Preferences,
             _ => return None,
         })
     }
@@ -420,7 +418,6 @@ impl Dialog {
             Dialog::SshKeys { .. } => "ssh.keys",
             Dialog::CoAuthors { .. } => "commit.coAuthors",
             Dialog::Shortcuts => "shortcuts",
-            Dialog::Preferences => "preferences",
         }
     }
 }
@@ -1366,78 +1363,6 @@ fn body(app: &mut GitApp, ui: &mut egui::Ui, d: &mut Dialog, first: bool) -> Clo
                 });
             });
             if buttons(ui, "Close", true, false) != (false, false) {
-                return Close::Cancel;
-            }
-        }
-        Dialog::Preferences => {
-            ui.heading("Preferences");
-            ui.add_space(6.0);
-            ui.label(RichText::new("INTERFACE THEME").small().strong());
-            ui.horizontal(|ui| {
-                for a in Appearance::ALL {
-                    ui.radio_value(&mut app.prefs.appearance, a, a.label());
-                }
-            });
-            ui.add_space(6.0);
-            ui.label(RichText::new("ZOOM").small().strong());
-            let mut z = app.prefs.zoom * 100.0;
-            if ui
-                .add(egui::Slider::new(&mut z, 50.0..=300.0).step_by(5.0).suffix("%"))
-                .on_hover_text(util::shortcut_label("Mod+=") + " / " + &util::shortcut_label("Mod+-"))
-                .changed()
-            {
-                app.prefs.zoom = z / 100.0;
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("DIFF CONTEXT LINES").small().strong());
-            let mut c = app.prefs.context_lines;
-            if ui.add(egui::Slider::new(&mut c, 0..=20)).changed() {
-                app.prefs.context_lines = c;
-                app.session.view.context = c;
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("COMMITS LOADED IN THE GRAPH").small().strong());
-            let mut n = app.prefs.commit_limit;
-            if ui.add(egui::Slider::new(&mut n, 100..=50_000).logarithmic(true)).changed() {
-                app.prefs.commit_limit = n;
-            }
-            ui.checkbox(&mut app.prefs.reopen_last, "Reopen the last repository at start");
-            ui.horizontal(|ui| {
-                ui.label("Fetch automatically every");
-                ui.add(egui::DragValue::new(&mut app.prefs.auto_fetch_minutes).range(0..=240).suffix(" min"));
-                ui.label(RichText::new("(0: never)").small().weak());
-            });
-            ui.checkbox(&mut app.prefs.conflict_check, "Warn when merging the target or upstream branch would conflict")
-                .on_hover_text("Merges in memory in the background after each change; nothing on disk is touched");
-            if ui
-                .checkbox(&mut app.prefs.gravatar, "Show author pictures from Gravatar")
-                .on_hover_text("Sends a hash of each author's e-mail address to gravatar.com")
-                .changed()
-            {
-                app.avatars.set_enabled(app.prefs.gravatar);
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("TERMINAL").small().strong());
-            ui.checkbox(&mut app.prefs.builtin_terminal, format!("Open the terminal inside GitCraft ({})", util::shortcut_label("Mod+`")));
-            ui.add(
-                egui::TextEdit::singleline(&mut app.prefs.terminal)
-                    .hint_text("System default (e.g. kitty --directory {dir})")
-                    .desired_width(f32::INFINITY),
-            )
-            .on_hover_text("The command that opens a terminal; {dir} is the repository's folder");
-            ui.add_space(6.0);
-            ui.label(RichText::new("EDITOR").small().strong());
-            ui.add(egui::TextEdit::singleline(&mut app.prefs.editor).hint_text("System default (e.g. code -g {file})").desired_width(f32::INFINITY))
-                .on_hover_text("The command that opens a file; {file} is its path");
-            ui.add_space(6.0);
-            let git = app.session.git.version().unwrap_or_else(|e| e.to_string());
-            ui.label(RichText::new(git).small().weak());
-            let (ok, cancel) = buttons(ui, "Done", true, false);
-            if ok || cancel {
-                if app.session.view.commit_limit != app.prefs.commit_limit {
-                    app.session.view.commit_limit = app.prefs.commit_limit;
-                    let _ = app.session.refresh();
-                }
                 return Close::Cancel;
             }
         }
